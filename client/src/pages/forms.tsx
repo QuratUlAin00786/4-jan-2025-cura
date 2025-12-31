@@ -16,6 +16,8 @@ import {
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -849,6 +851,8 @@ export default function Forms() {
   const [showShareDialog, setShowShareDialog] = useState(false);
   const [showFormShareDialog, setShowFormShareDialog] = useState(false);
   const [showShareLinksDialog, setShowShareLinksDialog] = useState(false);
+  const [formToDelete, setFormToDelete] = useState<FormSummary | null>(null);
+  const [showDeleteFormDialog, setShowDeleteFormDialog] = useState(false);
   const [formLoadPayload, setFormLoadPayload] = useState<FormBuilderLoadPayload | undefined>(undefined);
   type FormsTab = "dynamic" | "saved" | "filled" | "forms" | "editor";
   const userIsPatient = Boolean(user && user.role === "patient");
@@ -2451,6 +2455,13 @@ Coverage Details: [Insurance Coverage]`;
       });
     },
   });
+
+  const confirmDeleteForm = () => {
+    if (!formToDelete) return;
+    deleteFormMutation.mutate(formToDelete.id);
+    setShowDeleteFormDialog(false);
+    setFormToDelete(null);
+  };
 
   // Filter users to get only doctors and patients
   const doctors = users.filter((user) => isDoctorLike(user.role) && user.isActive);
@@ -6049,18 +6060,39 @@ const formIds = useMemo(
           <TabsList className="grid grid-cols-5 gap-2 rounded-2xl border bg-white/80 p-1 text-xs font-semibold text-slate-600">
             {!userIsPatient && (
               <>
-                <TabsTrigger value="dynamic">Dynamic Form Builder</TabsTrigger>
-                <TabsTrigger value="saved">Saved Forms</TabsTrigger>
+                <TabsTrigger
+                  value="dynamic"
+                  className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-gray-200 data-[state=active]:text-black text-black"
+                >
+                  Dynamic Form Builder
+                </TabsTrigger>
+                <TabsTrigger
+                  value="saved"
+                  className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-gray-200 data-[state=active]:text-black text-black"
+                >
+                  Saved Forms
+                </TabsTrigger>
               </>
             )}
-            <TabsTrigger value="filled">Filled Forms</TabsTrigger>
+            <TabsTrigger
+              value="filled"
+              className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-gray-200 data-[state=active]:text-black text-black"
+            >
+              Filled Forms
+            </TabsTrigger>
             {!userIsPatient && (
-              <TabsTrigger value="editor">Document Editor</TabsTrigger>
+              <TabsTrigger
+                value="editor"
+                className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-gray-200 data-[state=active]:text-black text-black"
+              >
+                Document Editor
+              </TabsTrigger>
             )}
           </TabsList>
 
           {!userIsPatient && (
-            <TabsContent value="dynamic" className="space-y-6">
+            <>
+              <TabsContent value="dynamic" className="space-y-6">
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">Dynamic Form Builder</p>
                 <p className="text-xs text-gray-500 dark:text-gray-500">
@@ -6071,7 +6103,116 @@ const formIds = useMemo(
                 loadForm={formLoadPayload}
                 onLoadComplete={() => setFormLoadPayload(undefined)}
               />
-            </TabsContent>
+              </TabsContent>
+              <TabsContent value="saved" className="space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">Saved Forms</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-500">
+                      Send one of your saved dynamic forms to a patient using a secure link.
+                    </p>
+                  </div>
+                  <span className="text-xs text-gray-400">Auto synced</span>
+                </div>
+                {formsLoading ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">Loading saved forms…</p>
+                ) : savedForms.length === 0 ? (
+                  <p className="text-sm text-gray-500 dark:text-gray-400">No forms saved yet. Create one above to start sharing.</p>
+                ) : (
+                  <div className="space-y-3 max-h-[770px] overflow-y-auto pr-2">
+                    {savedFormsToDisplay.map((form) => {
+                      const creatorId =
+                        form.createdBy ??
+                        form.metadata?.createdBy ??
+                        form.metadata?.created_by ??
+                        form.metadata?.userId;
+                      const creator = creatorId ? creatorsById.get(Number(creatorId)) : undefined;
+                      return (
+                        <div
+                          key={form.id}
+                          className="flex flex-col justify-between gap-4 p-4 border rounded-lg bg-white dark:bg-[#0b0c16] border-gray-200 dark:border-gray-800"
+                        >
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-2">
+                              <p className="font-semibold text-gray-800 dark:text-gray-100">{form.title}</p>
+                            </div>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{form.description || "No description provided."}</p>
+                            <p className="text-xs text-gray-400">Created {new Date(form.createdAt).toLocaleDateString()}</p>
+                            {creator && (
+                              <p className="text-xs text-gray-400">
+                                Created by {creator.name}
+                                {creator.email ? ` (${creator.email})` : ""}
+                              </p>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap items-center justify-between gap-3">
+                            <div className="flex flex-wrap gap-2">
+                          <Button
+                            size="sm"
+                            className="px-3 py-1 rounded-md bg-gray-200 text-black shadow-sm border border-transparent hover:bg-gray-300"
+                            onClick={() => openFormShareDialog(form)}
+                            disabled={patientsLoading || !patientsFromTable.length}
+                          >
+                            Share
+                          </Button>
+                              <Button
+                                size="sm"
+                                className="px-3 py-1 rounded-md bg-[#10b981] text-white shadow-sm border border-transparent hover:bg-[#059669]"
+                                onClick={() => handleViewFormResponses(form)}
+                              >
+                                View responses
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="px-3 py-1 rounded-md bg-[#ef4444] text-white shadow-sm border border-transparent hover:bg-[#dc2626]"
+                                onClick={() => {
+                                  setFormToDelete(form);
+                                  setShowDeleteFormDialog(true);
+                                }}
+                                disabled={deleteFormMutation.isPending}
+                              >
+                                Delete
+                              </Button>
+                              <Button
+                                size="sm"
+                                className="px-3 py-1 rounded-md bg-[#f97316] text-white shadow-sm border border-transparent hover:bg-[#ea580c]"
+                                onClick={() => openShareLinksDialog(form)}
+                              >
+                                Links
+                              </Button>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => loadFormIntoBuilder(form)}
+                              >
+                                Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                disabled={!latestLinks[form.id]}
+                                asChild
+                              >
+                                <a
+                                  href={latestLinks[form.id]}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className={!latestLinks[form.id] ? "pointer-events-none opacity-60" : ""}
+                                >
+                                  Open Form
+                                </a>
+                              </Button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </TabsContent>
+            </>
           )}
 
           {!userIsPatient && (
@@ -6680,117 +6821,6 @@ const formIds = useMemo(
             </TabsContent>
           )}
 
-          {!userIsPatient && (
-            <TabsContent value="saved" className="space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">Saved Forms</p>
-                  <p className="text-xs text-gray-500 dark:text-gray-500">
-                    Send one of your saved dynamic forms to a patient using a secure link.
-                  </p>
-                </div>
-                <span className="text-xs text-gray-400">Auto synced</span>
-              </div>
-              {formsLoading ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">Loading saved forms…</p>
-              ) : savedForms.length === 0 ? (
-                <p className="text-sm text-gray-500 dark:text-gray-400">No forms saved yet. Create one above to start sharing.</p>
-              ) : (
-                <div className="space-y-3 max-h-[770px] overflow-y-auto pr-2">
-                  {savedFormsToDisplay.map((form) => {
-                    const creatorId =
-                      form.createdBy ??
-                      form.metadata?.createdBy ??
-                      form.metadata?.created_by ??
-                      form.metadata?.userId;
-                    const creator = creatorId ? creatorsById.get(Number(creatorId)) : undefined;
-                    return (
-                    <div
-                      key={form.id}
-                      className="flex flex-col justify-between gap-4 p-4 border rounded-lg bg-white dark:bg-[#0b0c16] border-gray-200 dark:border-gray-800"
-                    >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <p className="font-semibold text-gray-800 dark:text-gray-100">{form.title}</p>
-                        </div>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">{form.description || "No description provided."}</p>
-                        <p className="text-xs text-gray-400">Created {new Date(form.createdAt).toLocaleDateString()}</p>
-                        {creator && (
-                          <p className="text-xs text-gray-400">
-                            Created by {creator.name}
-                            {creator.email ? ` (${creator.email})` : ""}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => openFormShareDialog(form)}
-                            disabled={patientsLoading || !patientsFromTable.length}
-                          >
-                            Share
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleViewFormResponses(form)}
-                          >
-                            View responses
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => {
-                              if (!window.confirm("Delete this form and all its data?")) return;
-                              deleteFormMutation.mutate(form.id);
-                            }}
-                            disabled={deleteFormMutation.isPending}
-                          >
-                            Delete
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => openShareLinksDialog(form)}
-                          >
-                            Links
-                          </Button>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => loadFormIntoBuilder(form)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="secondary"
-                            disabled={!latestLinks[form.id]}
-                            asChild
-                          >
-                            <a
-                              href={latestLinks[form.id]}
-                              target="_blank"
-                              rel="noreferrer"
-                              className={!latestLinks[form.id] ? "pointer-events-none opacity-60" : ""}
-                            >
-                              Open Form
-                            </a>
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-                </div>
-              )}
-            </TabsContent>
-          )}
-
             <TabsContent value="filled">
               <div className="flex items-center justify-between mb-4">
                 <div>
@@ -7034,6 +7064,40 @@ const formIds = useMemo(
               <FormFill />
             </TabsContent>
           </Tabs>
+          <Dialog
+            open={showDeleteFormDialog}
+            onOpenChange={(open) => {
+              if (!open) {
+                setFormToDelete(null);
+              }
+              setShowDeleteFormDialog(open);
+            }}
+          >
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Delete Form</DialogTitle>
+                <DialogDescription>
+                  Are you sure you want to delete{" "}
+                  <span className="font-semibold">{formToDelete?.title}</span>? This will remove the form and all its related shares, responses, and logs.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter className="space-x-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowDeleteFormDialog(false);
+                    setFormToDelete(null);
+                  }}
+                  disabled={deleteFormMutation.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button variant="destructive" onClick={confirmDeleteForm} disabled={deleteFormMutation.isPending}>
+                  {deleteFormMutation.isPending ? "Deleting..." : "Yes, delete it"}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
         <Dialog
           open={showFormShareDialog}

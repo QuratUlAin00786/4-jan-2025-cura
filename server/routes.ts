@@ -25356,7 +25356,7 @@ Cura EMR Team
     }
   });
 
-  app.post("/api/pricing/treatments", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
+  app.post("/api/pricing/treatments", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
     try {
       const organizationId = requireOrgId(req);
       const payload = enforceCreatedBy(req, {
@@ -25371,7 +25371,7 @@ Cura EMR Team
     }
   });
 
-  app.patch("/api/pricing/treatments/:id", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
+  app.patch("/api/pricing/treatments/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
     try {
       const organizationId = requireOrgId(req);
       const updated = await storage.updateTreatment(parseInt(req.params.id), organizationId, req.body);
@@ -25384,7 +25384,7 @@ Cura EMR Team
     }
   });
 
-  app.delete("/api/pricing/treatments/:id", authMiddleware, requireRole('admin'), multiTenantEnforcer(), async (req: TenantRequest, res) => {
+  app.delete("/api/pricing/treatments/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
     try {
       const organizationId = requireOrgId(req);
       const success = await storage.deleteTreatment(parseInt(req.params.id), organizationId);

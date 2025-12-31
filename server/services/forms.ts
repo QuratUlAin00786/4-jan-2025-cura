@@ -559,6 +559,10 @@ export class FormService {
       await db.delete(formResponses).where(inArray(formResponses.id, responseIdValues));
     }
 
+    await db.delete(formShareLogs).where(
+      and(eq(formShareLogs.formId, formId), eq(formShareLogs.organizationId, organizationId)),
+    );
+
     if (shareIdValues.length) {
       await db.delete(formShares).where(inArray(formShares.id, shareIdValues));
     }

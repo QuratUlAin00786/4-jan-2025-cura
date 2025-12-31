@@ -209,6 +209,7 @@ function PricingManagementDashboard() {
   });
   const [treatmentError, setTreatmentError] = useState("");
   const [isSavingTreatment, setIsSavingTreatment] = useState(false);
+  const [editingTreatment, setEditingTreatment] = useState<any>(null);
 
   const { data: users = [] } = useQuery({
     queryKey: ["/api/users"],
@@ -343,6 +344,18 @@ function PricingManagementDashboard() {
       colorCode: "#000000",
     });
     setTreatmentError("");
+    setEditingTreatment(null);
+    setShowAddTreatmentDialog(true);
+  };
+
+  const openEditTreatmentDialog = (treatment: any) => {
+    setTreatmentForm({
+      name: treatment.name || "",
+      basePrice: treatment.basePrice?.toString?.() ?? "",
+      colorCode: treatment.colorCode || "#000000",
+    });
+    setTreatmentError("");
+    setEditingTreatment(treatment);
     setShowAddTreatmentDialog(true);
   };
 
@@ -364,19 +377,79 @@ function PricingManagementDashboard() {
 
     setIsSavingTreatment(true);
     try {
-      await apiRequest("POST", "/api/pricing/treatments", {
-        name: treatmentForm.name.trim(),
-        basePrice: parsedPrice,
-        colorCode: treatmentForm.colorCode,
-        currency: "GBP",
-      });
-      toast({ title: "Success", description: "Treatment added" });
+      if (editingTreatment) {
+        await apiRequest("PATCH", `/api/pricing/treatments/${editingTreatment.id}`, {
+          name: treatmentForm.name.trim(),
+          basePrice: parsedPrice,
+          colorCode: treatmentForm.colorCode,
+          currency: "GBP",
+        });
+        toast({ title: "Success", description: "Treatment updated" });
+      } else {
+        await apiRequest("POST", "/api/pricing/treatments", {
+          name: treatmentForm.name.trim(),
+          basePrice: parsedPrice,
+          colorCode: treatmentForm.colorCode,
+          currency: "GBP",
+        });
+        toast({ title: "Success", description: "Treatment added" });
+      }
+
       queryClient.invalidateQueries({ queryKey: ["/api/pricing/treatments"] });
       setShowAddTreatmentDialog(false);
+      setEditingTreatment(null);
+      setTreatmentForm({
+        name: "",
+        basePrice: "",
+        colorCode: "#000000",
+      });
     } catch (error: any) {
-      setTreatmentError(error.message || "Failed to add treatment");
+      setTreatmentError(error.message || "Failed to save treatment");
     } finally {
       setIsSavingTreatment(false);
+    }
+  };
+
+  const [treatmentToDelete, setTreatmentToDelete] = useState<{ id: number; name?: string } | null>(null);
+  const [showDeleteTreatmentDialog, setShowDeleteTreatmentDialog] = useState(false);
+
+  const handleDeleteTreatment = (treatment: any) => {
+    if (!treatment?.id) {
+      toast({
+        title: "Delete Failed",
+        description: "Treatment ID is missing. Unable to delete.",
+        variant: "destructive",
+      });
+      return;
+    }
+    setTreatmentToDelete({ id: treatment.id, name: treatment.name });
+    setShowDeleteTreatmentDialog(true);
+  };
+
+  const confirmDeleteTreatment = async () => {
+    if (!treatmentToDelete) {
+      setShowDeleteTreatmentDialog(false);
+      toast({
+        title: "Delete Failed",
+        description: "Treatment ID is missing, please try again.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    try {
+      await apiRequest("DELETE", `/api/pricing/treatments/${treatmentToDelete.id}`, {});
+      toast({ title: "Success", description: "Treatment deleted" });
+      queryClient.invalidateQueries({ queryKey: ["/api/pricing/treatments"] });
+    } catch (error: any) {
+      toast({
+        title: "Delete Failed",
+        description: error.message || "Failed to delete treatment",
+        variant: "destructive",
+      });
+    } finally {
+      setShowDeleteTreatmentDialog(false);
+      setTreatmentToDelete(null);
     }
   };
 
@@ -1224,12 +1297,13 @@ function PricingManagementDashboard() {
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b bg-gray-50 dark:bg-gray-800">
+                  <tr className="border-b bg-gray-50 dark:bg-gray-800">
                   <th className="text-left p-3">Name</th>
                   <th className="text-left p-3">Price</th>
                   <th className="text-left p-3">Color</th>
                   <th className="text-left p-3">Status</th>
                   <th className="text-left p-3">Version</th>
+                    <th className="text-left p-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -1260,6 +1334,30 @@ function PricingManagementDashboard() {
                       </Badge>
                     </td>
                     <td className="p-3">v{treatment.version ?? 1}</td>
+                    <td className="p-3">
+                      <div className="flex gap-2">
+                        {canEdit('billing') && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => openEditTreatmentDialog(treatment)}
+                            data-testid={`button-edit-treatment-${treatment.id}`}
+                          >
+                            <Edit className="h-4 w-4" />
+                          </Button>
+                        )}
+                        {canDelete('billing') && (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => handleDeleteTreatment(treatment)}
+                            data-testid={`button-delete-treatment-${treatment.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -2263,9 +2361,11 @@ function PricingManagementDashboard() {
       <Dialog open={showAddTreatmentDialog} onOpenChange={setShowAddTreatmentDialog}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Add Treatment</DialogTitle>
+            <DialogTitle>{editingTreatment ? "Edit Treatment" : "Add Treatment"}</DialogTitle>
             <DialogDescription>
-              Save a new treatment so it appears in the Pricing Management grid.
+              {editingTreatment
+                ? "Update the treatment details and save the changes."
+                : "Save a new treatment so it appears in the Pricing Management grid."}
             </DialogDescription>
           </DialogHeader>
 
@@ -2314,7 +2414,38 @@ function PricingManagementDashboard() {
               Cancel
             </Button>
             <Button onClick={handleTreatmentSave} disabled={isSavingTreatment}>
-              {isSavingTreatment ? "Saving..." : "Add New Treatments"}
+              {isSavingTreatment ? "Saving..." : editingTreatment ? "Save Changes" : "Add New Treatments"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={showDeleteTreatmentDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            setTreatmentToDelete(null);
+          }
+          setShowDeleteTreatmentDialog(open);
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete Treatment</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete this treatment?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="space-x-2">
+            <Button variant="outline" onClick={() => setShowDeleteTreatmentDialog(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={confirmDeleteTreatment}
+              data-testid="button-confirm-delete-treatment"
+            >
+              Delete
             </Button>
           </DialogFooter>
         </DialogContent>
