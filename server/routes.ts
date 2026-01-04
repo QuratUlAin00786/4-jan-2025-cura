@@ -19,7 +19,7 @@ import { messagingService } from "./messaging-service";
 import { isDoctorLike } from './utils/role-utils.js';
 // PayPal imports moved to dynamic imports to avoid initialization errors when credentials are missing
 import { gdprComplianceService } from "./services/gdpr-compliance";
-import { insertGdprConsentSchema, insertGdprDataRequestSchema, updateMedicalImageReportFieldSchema, medicationsDatabase, patientDrugInteractions, insuranceVerifications, type Appointment, organizations, subscriptions, users, patients, symptomChecks, quickbooksConnections, insertClinicHeaderSchema, insertClinicFooterSchema, doctorsFee, invoices, labResults, insertMessageTemplateSchema, passwordResetTokens, saasSubscriptions, organizationIntegrations } from "../shared/schema";
+import { insertGdprConsentSchema, insertGdprDataRequestSchema, updateMedicalImageReportFieldSchema, medicationsDatabase, patientDrugInteractions, insuranceVerifications, type Appointment, organizations, subscriptions, users, patients, symptomChecks, quickbooksConnections, insertClinicHeaderSchema, insertClinicFooterSchema, doctorsFee, invoices, labResults, insertMessageTemplateSchema, passwordResetTokens, saasSubscriptions, organizationIntegrations, insertTreatmentSchema, insertTreatmentsInfoSchema } from "../shared/schema";
 import * as schema from "../shared/schema";
 import { db, pool } from "./db";
 import { and, eq, sql, desc, isNull, isNotNull, or, gte, lte, ne } from "drizzle-orm";
@@ -12760,15 +12760,32 @@ This treatment plan should be reviewed and adjusted based on individual patient 
     try {
       const userId = req.user!.id;
       const organizationId = req.tenant!.id;
-      const limit = parseInt(req.query.limit as string) || 20;
-      const isAdminUser = req.user!.role === "admin";
-      const notifications = isAdminUser
-        ? await storage.getNotificationsByOrganization(organizationId, limit)
-        : await storage.getNotifications(userId, organizationId, limit);
+      const limitParam = parseInt(req.query.limit as string);
+      const limit = Number.isNaN(limitParam) ? 20 : limitParam;
+
+      let notifications;
+      if (req.user!.role === "admin" && limit <= 0) {
+        notifications = await storage.getNotificationsByOrganization(organizationId, limit);
+      } else {
+        const safeLimit = limit <= 0 ? 20 : limit;
+        notifications = await storage.getNotifications(userId, organizationId, safeLimit);
+      }
+
       res.json(notifications);
     } catch (error) {
       console.error("Error fetching notifications:", error);
       res.status(500).json({ error: "Failed to fetch notifications" });
+    }
+  });
+
+  app.get("/api/notifications/count", authMiddleware, async (req: TenantRequest, res) => {
+    try {
+      const organizationId = req.tenant!.id;
+      const count = await storage.getNotificationCountByOrganization(organizationId);
+      res.json({ count });
+    } catch (error) {
+      console.error("Error fetching notification count:", error);
+      res.status(500).json({ error: "Failed to fetch notification count" });
     }
   });
 
@@ -12777,10 +12794,10 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const userId = req.user!.id;
       const organizationId = req.tenant!.id;
 
-      const isAdminUser = req.user!.role === "admin";
-      const count = isAdminUser
-        ? await storage.getUnreadNotificationCountByOrganization(organizationId)
-        : await storage.getUnreadNotificationCount(userId, organizationId);
+      const count =
+        req.user!.role === "admin"
+          ? await storage.getUnreadNotificationCountByOrganization(organizationId)
+          : await storage.getUnreadNotificationCount(userId, organizationId);
       res.json({ count });
     } catch (error) {
       console.error("Error fetching unread count:", error);
@@ -12853,11 +12870,8 @@ This treatment plan should be reviewed and adjusted based on individual patient 
       const notificationId = parseInt(req.params.id);
       const userId = req.user!.id;
       const organizationId = req.tenant!.id;
-      const isAdminUser = req.user!.role === "admin";
 
-      const notification = isAdminUser
-        ? await storage.markNotificationAsDismissedByOrganization(notificationId, organizationId)
-        : await storage.markNotificationAsDismissed(notificationId, userId, organizationId);
+      const notification = await storage.markNotificationAsDismissed(notificationId, userId, organizationId);
 
       if (!notification) {
         return res.status(404).json({ error: "Notification not found" });
@@ -25365,27 +25379,164 @@ Cura EMR Team
   app.post("/api/pricing/treatments", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
     try {
       const organizationId = requireOrgId(req);
-      const payload = enforceCreatedBy(req, {
-        ...req.body,
-        organizationId
-      }, 'createdBy');
+      
+      // BUILD A CLEAN OBJECT: Drizzle-Zod can be very picky about extra fields or types
+      const cleanPayload: any = {
+        organizationId,
+        createdBy: req.user!.id,
+        name: String(req.body.name || "").trim(),
+        basePrice: String(req.body.basePrice || "0"),
+        colorCode: String(req.body.colorCode || "#2563eb"),
+        currency: String(req.body.currency || "GBP"),
+        isActive: req.body.isActive ?? true,
+        version: Number(req.body.version || 1),
+        notes: req.body.notes ? String(req.body.notes) : null,
+        metadata: req.body.metadata || {}
+      };
 
-      const treatment = await storage.createTreatment(payload);
+      // Only add doctor fields if they are provided
+      if (req.body.doctorId) cleanPayload.doctorId = Number(req.body.doctorId);
+      if (req.body.doctorName) cleanPayload.doctorName = String(req.body.doctorName);
+      if (req.body.doctorRole) cleanPayload.doctorRole = String(req.body.doctorRole);
+
+      console.log("Saving treatment with clean payload:", JSON.stringify(cleanPayload, null, 2));
+
+      // Use the schema to validate the clean object
+      const validatedData = insertTreatmentSchema.parse(cleanPayload);
+      const treatment = await storage.createTreatment(validatedData);
       res.status(201).json(treatment);
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        console.error("Treatment validation failed:", JSON.stringify(error.format(), null, 2));
+        return res.status(400).json({ 
+          error: "Validation failed", 
+          details: error.format(),
+          receivedData: req.body 
+        });
+      }
       handleRouteError(error, "create treatment pricing", res);
+    }
+  });
+
+  // Treatments Info (name + color metadata)
+  app.post("/api/treatments-info", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
+    try {
+      const organizationId = req.organizationId ?? req.user?.organizationId;
+      if (!organizationId) {
+        throw new Error("Organization context is missing for treatments info creation");
+      }
+      const payloadWithOrg = {
+        ...req.body,
+        organizationId
+      };
+      const preparedPayload = enforceCreatedBy(req, payloadWithOrg, 'createdBy');
+      const validatedPayload = insertTreatmentsInfoSchema.parse(preparedPayload);
+      const info = await storage.createTreatmentsInfo(validatedPayload);
+      res.status(201).json(info);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        console.error("Treatments info validation failed:", JSON.stringify(error.format(), null, 2));
+        return res.status(400).json({
+          error: "Validation failed",
+          details: error.format(),
+          receivedData: req.body
+        });
+      }
+      handleRouteError(error, "create treatments info", res);
+    }
+  });
+
+  app.get("/api/treatments-info", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const infos = await storage.getTreatmentsInfo(organizationId);
+      res.json(infos);
+    } catch (error) {
+      handleRouteError(error, "fetch treatments info", res);
+    }
+  });
+
+  app.patch("/api/treatments-info/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const updatePayload: any = {};
+
+      if (req.body.name !== undefined) updatePayload.name = String(req.body.name).trim();
+      if (req.body.colorCode !== undefined) updatePayload.colorCode = String(req.body.colorCode);
+
+      const validatedData = insertTreatmentsInfoSchema.partial().parse(updatePayload);
+      const updated = await storage.updateTreatmentsInfo(parseInt(req.params.id), organizationId, validatedData);
+
+      if (!updated) {
+        return res.status(404).json({ error: "Treatment metadata not found" });
+      }
+
+      res.json(updated);
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        console.error("Treatments info update validation failed:", JSON.stringify(error.format(), null, 2));
+        return res.status(400).json({
+          error: "Validation failed",
+          details: error.format(),
+          receivedData: req.body
+        });
+      }
+      handleRouteError(error, "update treatments info", res);
+    }
+  });
+
+  app.delete("/api/treatments-info/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
+    try {
+      const organizationId = requireOrgId(req);
+      const success = await storage.deleteTreatmentsInfo(parseInt(req.params.id), organizationId);
+      if (!success) {
+        return res.status(404).json({ error: "Treatment metadata not found" });
+      }
+      res.json({ message: "Treatment metadata deleted successfully" });
+    } catch (error) {
+      handleRouteError(error, "delete treatments info", res);
     }
   });
 
   app.patch("/api/pricing/treatments/:id", authMiddleware, requireRole(['admin', 'doctor', 'nurse']), multiTenantEnforcer(), async (req: TenantRequest, res) => {
     try {
       const organizationId = requireOrgId(req);
-      const updated = await storage.updateTreatment(parseInt(req.params.id), organizationId, req.body);
+      
+      // BUILD A CLEAN UPDATE OBJECT
+      const updatePayload: any = {};
+      if (req.body.name !== undefined) updatePayload.name = String(req.body.name).trim();
+      if (req.body.basePrice !== undefined) updatePayload.basePrice = String(req.body.basePrice);
+      if (req.body.colorCode !== undefined) updatePayload.colorCode = String(req.body.colorCode);
+      if (req.body.currency !== undefined) updatePayload.currency = String(req.body.currency);
+      if (req.body.isActive !== undefined) updatePayload.isActive = !!req.body.isActive;
+      if (req.body.version !== undefined) updatePayload.version = Number(req.body.version);
+      if (req.body.notes !== undefined) updatePayload.notes = req.body.notes ? String(req.body.notes) : null;
+      if (req.body.metadata !== undefined) updatePayload.metadata = req.body.metadata;
+      
+      if (req.body.doctorId !== undefined) updatePayload.doctorId = req.body.doctorId ? Number(req.body.doctorId) : null;
+      if (req.body.doctorName !== undefined) updatePayload.doctorName = req.body.doctorName ? String(req.body.doctorName) : null;
+      if (req.body.doctorRole !== undefined) updatePayload.doctorRole = req.body.doctorRole ? String(req.body.doctorRole) : null;
+
+      console.log(`Updating treatment ${req.params.id} with clean payload:`, JSON.stringify(updatePayload, null, 2));
+
+      // Validate update payload with partial schema
+      const validatedData = insertTreatmentSchema.partial().parse(updatePayload);
+      
+      const updated = await storage.updateTreatment(parseInt(req.params.id), organizationId, validatedData);
+      
       if (!updated) {
         return res.status(404).json({ error: "Treatment pricing not found" });
       }
       res.json(updated);
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        console.error("Treatment update validation failed:", JSON.stringify(error.format(), null, 2));
+        return res.status(400).json({ 
+          error: "Validation failed", 
+          details: error.format(),
+          receivedData: req.body 
+        });
+      }
       handleRouteError(error, "update treatment pricing", res);
     }
   });

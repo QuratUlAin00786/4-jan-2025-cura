@@ -14,26 +14,18 @@ import {
   MessageSquare,
   X,
   Check,
-  Filter,
-  Search,
   Trash2,
   CheckCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { 
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { useAuth } from "@/hooks/use-auth";
 
 interface Notification {
   id: number;
@@ -62,17 +54,20 @@ export default function NotificationsPage() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  
-  // Filter states
-  const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [priorityFilter, setPriorityFilter] = useState<string>("all");
-  const [searchQuery, setSearchQuery] = useState("");
   const [selectedNotifications, setSelectedNotifications] = useState<number[]>([]);
 
   // Fetch notifications
+  const { user } = useAuth();
+  const notificationsEndpoint = user?.role === "admin" ? "/api/notifications?limit=0" : "/api/notifications";
   const { data: notifications = [], isLoading } = useQuery<Notification[]>({
-    queryKey: ["/api/notifications"],
+    queryKey: [notificationsEndpoint],
+    queryFn: async () => {
+      const response = await apiRequest("GET", notificationsEndpoint);
+      if (!response.ok) {
+        throw new Error("Failed to fetch notifications");
+      }
+      return response.json();
+    },
   });
 
   // Mark as read mutation
@@ -229,7 +224,7 @@ export default function NotificationsPage() {
   };
 
   const selectAll = () => {
-    const allIds = filteredNotifications.map(n => n.id);
+    const allIds = notifications.map(n => n.id);
     setSelectedNotifications(allIds);
   };
 
@@ -244,39 +239,19 @@ export default function NotificationsPage() {
     setSelectedNotifications([]);
   };
 
-  // Apply filters
-  const filteredNotifications = notifications.filter((notification) => {
-    // Status filter
-    if (statusFilter !== "all" && notification.status !== statusFilter) {
-      return false;
-    }
-
-    // Type filter
-    if (typeFilter !== "all" && notification.type !== typeFilter) {
-      return false;
-    }
-
-    // Priority filter
-    if (priorityFilter !== "all" && notification.priority !== priorityFilter) {
-      return false;
-    }
-
-    // Search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      return (
-        notification.title.toLowerCase().includes(query) ||
-        notification.message.toLowerCase().includes(query) ||
-        notification.metadata?.patientName?.toLowerCase().includes(query) ||
-        notification.metadata?.department?.toLowerCase().includes(query)
-      );
-    }
-
-    return true;
+  const { data: unreadCountData } = useQuery({
+    queryKey: ["/api/notifications/unread-count"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/notifications/unread-count");
+      if (!response.ok) {
+        throw new Error("Failed to fetch unread count");
+      }
+      return response.json();
+    },
+    refetchInterval: 30000,
   });
 
-  const unreadCount = notifications.filter(n => n.status === "unread").length;
-  const uniqueTypes = Array.from(new Set(notifications.map(n => n.type)));
+  const unreadCount = (unreadCountData as { count: number })?.count || 0;
 
   return (
     <div className="p-6 space-y-6">
@@ -305,113 +280,18 @@ export default function NotificationsPage() {
         </div>
       </div>
 
-      {/* Filters */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center text-blue-800 dark:text-blue-400">
-            <Filter className="h-5 w-5 mr-2" />
-            Filters
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-            {/* Search */}
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-              <Input
-                placeholder="Search notifications..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="pl-10"
-                data-testid="input-search-notifications"
-              />
-            </div>
-
-            {/* Status Filter */}
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger data-testid="select-status-filter">
-                <SelectValue placeholder="All statuses" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All statuses</SelectItem>
-                <SelectItem value="unread">Unread</SelectItem>
-                <SelectItem value="read">Read</SelectItem>
-                <SelectItem value="dismissed">Dismissed</SelectItem>
-              </SelectContent>
-            </Select>
-
-            {/* Type Filter */}
-            <Select value={typeFilter} onValueChange={setTypeFilter}>
-              <SelectTrigger data-testid="select-type-filter">
-                <SelectValue placeholder="All types" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All types</SelectItem>
-                {uniqueTypes.map((type) => (
-                  <SelectItem key={type} value={type}>
-                    {getTypeLabel(type)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
-            {/* Priority Filter */}
-            <Select value={priorityFilter} onValueChange={setPriorityFilter}>
-              <SelectTrigger data-testid="select-priority-filter">
-                <SelectValue placeholder="All priorities" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All priorities</SelectItem>
-                <SelectItem value="critical">Critical</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="normal">Normal</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Bulk Actions */}
-          {selectedNotifications.length > 0 && (
-            <div className="mt-4 flex items-center gap-3 p-3 bg-blue-50 dark:bg-blue-950 rounded-lg">
-              <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
-                {selectedNotifications.length} selected
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={deselectAll}
-                data-testid="button-deselect-all"
-              >
-                Deselect all
-              </Button>
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={deleteSelected}
-                disabled={deleteMutation.isPending}
-                data-testid="button-delete-selected"
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Delete selected
-              </Button>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
       {/* Notifications List */}
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle className="text-blue-800 dark:text-blue-400">
-              All Notifications ({filteredNotifications.length})
+              All Notifications ({notifications.length})
             </CardTitle>
             <CardDescription>
-              {filteredNotifications.length === 0 && searchQuery && "No notifications match your search"}
-              {filteredNotifications.length === 0 && !searchQuery && "No notifications to display"}
+              {notifications.length === 0 && "No notifications to display"}
             </CardDescription>
           </div>
-          {filteredNotifications.length > 0 && selectedNotifications.length === 0 && (
+          {notifications.length > 0 && selectedNotifications.length === 0 && (
             <Button
               variant="outline"
               size="sm"
@@ -427,19 +307,18 @@ export default function NotificationsPage() {
             <div className="flex items-center justify-center py-12">
               <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
             </div>
-          ) : filteredNotifications.length === 0 ? (
+          ) : notifications.length === 0 ? (
             <div className="text-center py-12 text-gray-500 dark:text-gray-400">
               <Bell className="h-16 w-16 mx-auto mb-4 text-gray-300 dark:text-gray-600" />
               <p className="font-medium text-lg">No notifications found</p>
               <p className="text-sm mt-1">
-                {searchQuery 
-                  ? "Try adjusting your filters or search query" 
-                  : "You're all caught up!"}
+                You're all caught up!
               </p>
             </div>
           ) : (
-            <div className="space-y-2">
-              {filteredNotifications.map((notification) => (
+          <ScrollArea className="max-h-[800px] h-[800px]">
+              <div className="space-y-2">
+                {notifications.map((notification) => (
                 <div
                   key={notification.id}
                   className={`p-4 border rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer transition-all ${
@@ -562,7 +441,8 @@ export default function NotificationsPage() {
                   </div>
                 </div>
               ))}
-            </div>
+              </div>
+            </ScrollArea>
           )}
         </CardContent>
       </Card>

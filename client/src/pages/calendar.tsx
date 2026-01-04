@@ -12,7 +12,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Calendar, Plus, Users, Clock, User, X, Check, ChevronsUpDown, Phone, Mail, FileText, MapPin, Filter, FilterX, CreditCard } from "lucide-react";
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { format, isBefore, startOfDay, addMonths, isAfter } from "date-fns";
 import { useLocation } from "wouter";
 import { useMutation, useQueryClient, useQuery } from "@tanstack/react-query";
@@ -44,6 +44,23 @@ const formatDecimalString = (value?: number | string | null): string => {
     return "0.00";
   }
   return numeric.toFixed(2);
+};
+
+const normalizeName = (value?: string) => {
+  if (!value) return "";
+  return value.replace(/^dr\.?\s+/i, "").trim().toLowerCase();
+};
+
+const normalizeText = (value?: string) => {
+  if (!value) return "";
+  return value.trim().toLowerCase();
+};
+const formatRoleLabel = (role?: string) => {
+  if (!role) return "";
+  return role
+    .split('_')
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(' ');
 };
 
 const buildInvoiceDefaults = (appointment: any, serviceInfo: BookingServiceInfo | null) => {
@@ -466,6 +483,35 @@ export default function CalendarPage() {
     return map;
   }, [consultationServices]);
 
+  const userRoleLower = user?.role?.toLowerCase() || "";
+  const isProviderUser = userRoleLower === "doctor" || userRoleLower === "nurse";
+  const normalizedUserFullName = `${user?.firstName || ""} ${user?.lastName || ""}`.trim().toLowerCase();
+  const displayRoleLabel = user?.role
+    ? user.role.charAt(0).toUpperCase() + user.role.slice(1)
+    : "";
+
+  const matchesLoggedInProvider = useCallback(
+    (item: any) => {
+      if (!isProviderUser) return true;
+      const roleMatch = !item?.doctorRole || item.doctorRole?.toLowerCase() === userRoleLower;
+      if (!roleMatch) return false;
+      if (item?.doctorId && user?.id && item.doctorId === user.id) return true;
+      if (item?.doctorName && item.doctorName.toLowerCase() === normalizedUserFullName) return true;
+      return false;
+    },
+    [isProviderUser, normalizedUserFullName, user?.id, userRoleLower]
+  );
+
+  const doctorTreatmentsCatalog = useMemo(() => {
+    if (!isProviderUser) return treatmentsList;
+    return treatmentsList.filter(matchesLoggedInProvider);
+  }, [isProviderUser, treatmentsList, matchesLoggedInProvider]);
+
+  const doctorConsultationsCatalog = useMemo(() => {
+    if (!isProviderUser) return consultationServices;
+    return consultationServices.filter(matchesLoggedInProvider);
+  }, [isProviderUser, consultationServices, matchesLoggedInProvider]);
+
 const getBookingServiceInfo = (appointment: any): BookingServiceInfo | null => {
     if (!appointment) return null;
     if (appointment.appointmentType === "treatment" && appointment.treatmentId) {
@@ -623,7 +669,30 @@ const getAppointmentTypeLabel = (appointment: any): string => {
     () => getBookingServiceInfo(pendingAppointmentData),
     [pendingAppointmentData, treatmentsMap, consultationMap],
   );
-  
+
+  const patientHasRequiredServiceSelection = useMemo(() => {
+    if (user?.role !== "patient") return true;
+    if (!doctorAppointmentType) return false;
+    if (
+      doctorAppointmentType === "treatment" &&
+      !doctorAppointmentSelectedTreatment
+    ) {
+      return false;
+    }
+    if (
+      doctorAppointmentType === "consultation" &&
+      !doctorAppointmentSelectedConsultation
+    ) {
+      return false;
+    }
+    return true;
+  }, [
+    user?.role,
+    doctorAppointmentType,
+    doctorAppointmentSelectedTreatment,
+    doctorAppointmentSelectedConsultation,
+  ]);
+
   const [location] = useLocation();
   const { toast} = useToast();
   const queryClient = useQueryClient();
@@ -644,35 +713,101 @@ const getAppointmentTypeLabel = (appointment: any): string => {
     },
   });
 
+  const loggedInPatientRecord = useMemo(() => {
+    if (user?.role !== "patient") return null;
+    return patients.find((patient: any) => patient.email === user?.email) || null;
+  }, [user?.role, user?.email, patients]);
+
+  const pendingAppointmentPatient = useMemo(() => {
+    if (!pendingAppointmentData) return null;
+    const candidateId = pendingAppointmentData.patientId;
+    if (candidateId) {
+      const patient = patients.find((p: any) => {
+        if (p.id === candidateId) return true;
+        if (p.id?.toString() === candidateId?.toString()) return true;
+        if (p.patientId === candidateId) return true;
+        if (p.patientId === candidateId?.toString()) return true;
+        return false;
+      });
+      if (patient) return patient;
+    }
+    if (user?.role === 'patient') {
+      return (
+        loggedInPatientRecord || {
+          id: user.id,
+          firstName: user.firstName,
+          lastName: user.lastName,
+          patientId:
+            pendingAppointmentData.patientId ||
+            loggedInPatientRecord?.patientId ||
+            `P${user.id?.toString().padStart?.(6, '0') ?? ""}`,
+        }
+      );
+    }
+    return null;
+  }, [
+    pendingAppointmentData?.patientId,
+    patients,
+    loggedInPatientRecord,
+    user?.role,
+    user?.id,
+    user?.firstName,
+    user?.lastName,
+  ]);
+
+  const invoicePatientName = useMemo(() => {
+    if (pendingAppointmentPatient) {
+      return `${pendingAppointmentPatient.firstName} ${pendingAppointmentPatient.lastName}`.trim();
+    }
+    if (user?.role === 'patient' && user.firstName && user.lastName) {
+      return `${user.firstName} ${user.lastName}`.trim();
+    }
+    return 'N/A';
+  }, [pendingAppointmentPatient, user?.role, user?.firstName, user?.lastName]);
+
+  const patientIdForButton =
+    bookingForm.patientId || loggedInPatientRecord?.patientId || "";
+
+  const patientReadyForBooking =
+    user?.role === "patient" || Boolean(patientIdForButton);
+
   // Auto-populate patient when user is a patient - Match by email
   useEffect(() => {
-    if (user?.role === 'patient' && patients.length > 0 && !bookingForm.patientId && showNewAppointmentModal) {
-      console.log("🔍 CALENDAR: Looking for patient matching user:", { 
-        userEmail: user.email, 
-        userName: `${user.firstName} ${user.lastName}`,
-        userId: user.id 
-      });
-      console.log("📋 CALENDAR: Available patients:", patients.map((p: any) => ({ 
-        id: p.id,
-        email: p.email, 
-        name: `${p.firstName} ${p.lastName}` 
-      })));
-      
-      // Match by email address
-      const currentPatient = patients.find((patient: any) => 
-        patient.email === user.email
-      );
-      
-      if (currentPatient) {
-        console.log("✅ CALENDAR: Found matching patient record:", currentPatient);
-        // Use the patient RECORD ID
-        setBookingForm(prev => ({ ...prev, patientId: currentPatient.id.toString() }));
-        console.log("✅ CALENDAR: Set patientId to:", currentPatient.id.toString());
-      } else {
-        console.log("❌ CALENDAR: No matching patient found for email:", user.email);
+    if (
+      user?.role === 'patient' &&
+      !bookingForm.patientId &&
+      showNewAppointmentModal &&
+      loggedInPatientRecord
+    ) {
+      console.log("✅ CALENDAR: Auto-populating patient record:", loggedInPatientRecord);
+      setBookingForm(prev => ({
+        ...prev,
+        patientId:
+          loggedInPatientRecord.patientId || loggedInPatientRecord.id.toString(),
+      }));
+    }
+  }, [
+    user,
+    showNewAppointmentModal,
+    bookingForm.patientId,
+    loggedInPatientRecord,
+  ]);
+
+  useEffect(() => {
+    if (
+      user?.role === 'patient' &&
+      showNewAppointmentModal &&
+      !bookingForm.patientId
+    ) {
+      const candidateId = loggedInPatientRecord?.patientId;
+      if (candidateId) {
+        setBookingForm((prev) => ({
+          ...prev,
+          patientId: candidateId,
+        }));
       }
     }
-  }, [user, patients, showNewAppointmentModal, bookingForm.patientId]);
+  }, [user, showNewAppointmentModal, bookingForm.patientId, loggedInPatientRecord]);
   
   // Fetch medical staff with availability for appointment booking
   const { data: doctorsData, isLoading: isLoadingDoctors, error: doctorsError } = useQuery<any>({
@@ -858,6 +993,98 @@ const getAppointmentTypeLabel = (appointment: any): string => {
     console.log('✅ Filtered users count:', filtered.length, filtered);
     return filtered;
   }, [selectedRole, selectedMedicalSpecialty, usersData]);
+
+  const normalizedSelectedRole = selectedRole?.toLowerCase().trim() || "";
+  const selectedProviderIdNumber = selectedProviderId
+    ? Number(selectedProviderId)
+    : null;
+  const selectedProviderNameNormalized = useMemo(() => {
+    if (!selectedProviderIdNumber) return "";
+    const provider = filteredUsers.find(
+      (provider: any) => provider.id === selectedProviderIdNumber,
+    );
+    if (!provider) return "";
+    return normalizeText(`${provider.firstName || ""} ${provider.lastName || ""}`);
+  }, [selectedProviderIdNumber, filteredUsers]);
+
+  const entryMatchesSelectedProvider = (
+    entryRole: string,
+    entryName: string,
+    entryId: number | null,
+  ) => {
+    if (selectedProviderIdNumber && entryId !== null) {
+      if (entryId === selectedProviderIdNumber) {
+        return true;
+      }
+    }
+    if (
+      selectedProviderNameNormalized &&
+      entryName &&
+      entryName === selectedProviderNameNormalized
+    ) {
+      return true;
+    }
+    return !selectedProviderIdNumber && !selectedProviderNameNormalized;
+  };
+
+  const entryMatchesSelectedRole = (entryRole: string) => {
+    if (!normalizedSelectedRole) return true;
+    return entryRole === normalizedSelectedRole;
+  };
+
+  const patientTreatmentsCatalog = useMemo(() => {
+    if (!selectedRole && !selectedProviderIdNumber) return treatmentsList;
+    return treatmentsList.filter((treatment: any) => {
+      const entryRole = normalizeText(treatment.doctorRole ?? treatment.doctor_role);
+      const entryName = normalizeText(
+        treatment.doctorName ?? treatment.doctor_name,
+      );
+      const entryIdValue =
+        treatment.doctorId ?? treatment.doctor_id
+          ? Number(treatment.doctorId ?? treatment.doctor_id)
+          : null;
+      const matchesProvider = entryMatchesSelectedProvider(
+        entryRole,
+        entryName,
+        entryIdValue,
+      );
+      const matchesRole = entryMatchesSelectedRole(entryRole);
+      return matchesProvider && matchesRole;
+    });
+  }, [
+    treatmentsList,
+    selectedRole,
+    selectedProviderIdNumber,
+    selectedProviderNameNormalized,
+  ]);
+
+  const patientConsultationsCatalog = useMemo(() => {
+    if (!selectedRole && !selectedProviderIdNumber) return consultationServices;
+    return consultationServices.filter((service: any) => {
+      const entryRole = normalizeText(
+        service.doctorRole ?? service.doctor_role,
+      );
+      const entryName = normalizeText(
+        service.doctorName ?? service.doctor_name,
+      );
+      const entryIdValue =
+        service.doctorId ?? service.doctor_id
+          ? Number(service.doctorId ?? service.doctor_id)
+          : null;
+      const matchesProvider = entryMatchesSelectedProvider(
+        entryRole,
+        entryName,
+        entryIdValue,
+      );
+      const matchesRole = entryMatchesSelectedRole(entryRole);
+      return matchesProvider && matchesRole;
+    });
+  }, [
+    consultationServices,
+    selectedRole,
+    selectedProviderIdNumber,
+    selectedProviderNameNormalized,
+  ]);
 
   // Get filtered users by filter role for admin filter panel
   const filteredUsersByFilterRole = useMemo(() => {
@@ -1515,7 +1742,8 @@ const getAppointmentTypeLabel = (appointment: any): string => {
 
   // Auto-detect doctor when modal opens if user is a doctor
   useEffect(() => {
-    if (showNewAppointmentModal && isDoctorLike(user?.role)) {
+    if (!user) return;
+    if (showNewAppointmentModal && isDoctorLike(user.role)) {
       console.log('🔍 DOCTOR AUTO-DETECT: Modal opened for doctor role');
       console.log('👤 DOCTOR AUTO-DETECT: Current user ID:', user.id);
       
@@ -1722,7 +1950,12 @@ const getAppointmentTypeLabel = (appointment: any): string => {
         errorMessage = "The selected doctor is not available at this time. Please choose a different time slot.";
       }
       
-      setBookingErrorMessage(errorMessage);
+      const detailedMessage =
+        error?.message && error.message !== errorMessage
+          ? `${errorMessage} (${error.message})`
+          : errorMessage;
+      
+      setBookingErrorMessage(detailedMessage);
       setShowBookingErrorModal(true);
       setShowInvoiceModal(false);
       setShowInvoiceSummary(false);
@@ -1776,13 +2009,28 @@ const getAppointmentTypeLabel = (appointment: any): string => {
   });
 
   const handleBookAppointment = () => {
-    if (!selectedDoctor || !bookingForm.patientId || !bookingForm.scheduledAt) {
+    const patientRecord = patients.find((p: any) => 
+      p.userId === user?.id ||
+      p.email?.toLowerCase() === user?.email?.toLowerCase() ||
+      p.patientId === bookingForm.patientId ||
+      p.id.toString() === bookingForm.patientId
+    );
+    const resolvedPatientId =
+      patientRecord?.patientId ||
+      bookingForm.patientId ||
+      loggedInPatientRecord?.patientId ||
+      "";
+    if (!selectedDoctor || !resolvedPatientId || !bookingForm.scheduledAt) {
       toast({
         title: "Missing Information",
         description: "Please fill in all required fields.",
         variant: "destructive",
       });
       return;
+    }
+
+    if (!bookingForm.patientId && resolvedPatientId) {
+      setBookingForm((prev) => ({ ...prev, patientId: resolvedPatientId }));
     }
 
     // Validate that the appointment time is not in the past
@@ -1799,20 +2047,24 @@ const getAppointmentTypeLabel = (appointment: any): string => {
     }
 
     // Handle both numeric and string patient IDs
-    let patientId: string | number = bookingForm.patientId;
-    
-    // If it's a pure number, convert to integer
-    if (/^\d+$/.test(bookingForm.patientId)) {
-      patientId = parseInt(bookingForm.patientId);
+    if (!resolvedPatientId) {
+      toast({
+        title: "Missing patient record",
+        description: "We could not resolve your patient record. Please try again.",
+        variant: "destructive",
+      });
+      return;
     }
 
+    const dbPatientId = patientRecord?.id || null;
+
     // Check for duplicate appointments (same patient, same doctor, same date)
-    if (allAppointments && selectedDate) {
+    if (allAppointments && selectedDate && dbPatientId) {
       const selectedDateStr = format(selectedDate, 'yyyy-MM-dd');
       const duplicateAppointment = allAppointments.find((apt: any) => {
         const aptDateStr = format(new Date(apt.scheduledAt), 'yyyy-MM-dd');
         return (
-          apt.patientId.toString() === patientId.toString() &&
+          apt.patientId === dbPatientId &&
           apt.providerId.toString() === selectedDoctor.id.toString() &&
           aptDateStr === selectedDateStr &&
           apt.status !== 'cancelled' && // Don't count cancelled appointments as duplicates
@@ -1825,12 +2077,10 @@ const getAppointmentTypeLabel = (appointment: any): string => {
         const formattedDate = format(selectedDate, 'MMMM do, yyyy');
         
         // Find patient name
-        const patient = patients.find((p: any) => 
-          p.userId === patientId.toString() || 
-          p.id === patientId || 
-          (p.patientId && p.patientId === patientId.toString()) ||
-          p.id.toString() === patientId.toString()
-        );
+    const patient = patientRecord || patients.find((p: any) => 
+      p.id === dbPatientId || 
+      p.id.toString() === dbPatientId.toString()
+    );
         const patientName = patient ? `${patient.firstName} ${patient.lastName}` : 'the patient';
         
         setDuplicateAppointmentDetails(`${patientName} on ${formattedDate}`);
@@ -1867,26 +2117,27 @@ const getAppointmentTypeLabel = (appointment: any): string => {
         ? doctorAppointmentSelectedConsultation?.id || null
         : null;
 
-    const appointmentData = {
+    const baseAppointmentData: any = {
       ...bookingForm,
-      patientId: patientId,
+      patientId: resolvedPatientId,
       providerId: selectedDoctor.id,
       title: bookingForm.title || `${bookingForm.type} with ${selectedDoctor.firstName} ${selectedDoctor.lastName}`,
       location: bookingForm.location || `${selectedDoctor.department} Department`,
       duration: parseInt(bookingForm.duration)
     };
-    if (isDoctorLike(user?.role)) {
-      appointmentData.appointmentType = normalizedDoctorAppointmentType;
-      appointmentData.treatmentId = treatmentId;
-      appointmentData.consultationId = consultationId;
-    }
+    const appointmentData = isDoctorLike(user?.role)
+      ? {
+          ...baseAppointmentData,
+          appointmentType: normalizedDoctorAppointmentType,
+          treatmentId,
+          consultationId,
+        }
+      : baseAppointmentData;
 
     // Find patient to get their name for the invoice
-    const patient = patients.find((p: any) => 
-      p.userId === patientId.toString() || 
-      p.id === patientId || 
-      (p.patientId && p.patientId === patientId.toString()) ||
-      p.id.toString() === patientId.toString()
+    const patient = patientRecord || patients.find((p: any) => 
+      p.id === dbPatientId ||
+      p.id.toString() === dbPatientId.toString()
     );
     
     if (!patient) {
@@ -1899,12 +2150,12 @@ const getAppointmentTypeLabel = (appointment: any): string => {
     }
 
     const patientName = `${patient.firstName} ${patient.lastName}`;
-    const serviceInfo = getBookingServiceInfo(patientAppointmentData);
-    const invoiceDefaults = buildInvoiceDefaults(patientAppointmentData, serviceInfo);
+    const serviceInfo = getBookingServiceInfo(appointmentData);
+    const invoiceDefaults = buildInvoiceDefaults(appointmentData, serviceInfo);
     
     // Create invoice data populated with selected service details
     const invoiceData = {
-      patientId: patientId.toString(),
+      patientId: resolvedPatientId,
       patientName: patientName,
       nhsNumber: patient.nhsNumber || undefined,
       dateOfService: invoiceDefaults.serviceDate,
@@ -2877,7 +3128,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                   <CommandList>
                                     <CommandEmpty>No treatments found.</CommandEmpty>
                                     <CommandGroup>
-                                      {treatmentsList.map((treatment: any) => (
+                                    {patientTreatmentsCatalog.map((treatment: any) => (
                                         <CommandItem
                                           key={treatment.id}
                                           value={treatment.id.toString()}
@@ -2941,7 +3192,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                   <CommandList>
                                     <CommandEmpty>No consultations found.</CommandEmpty>
                                     <CommandGroup>
-                                      {consultationServices.map((service: any) => (
+                                    {patientConsultationsCatalog.map((service: any) => (
                                         <CommandItem
                                           key={service.id}
                                           value={service.id.toString()}
@@ -3316,7 +3567,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                 {/* Doctor Avatar */}
                                 <div className="flex-shrink-0">
                                   <div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center text-white font-semibold text-lg">
-                                    {`${user.firstName?.[0] || ''}${user.lastName?.[0] || ''}`.toUpperCase()}
+                                    {`${user?.firstName?.[0] || ''}${user?.lastName?.[0] || ''}`.toUpperCase()}
                                   </div>
                                 </div>
                                 
@@ -3325,31 +3576,36 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                   {/* Name and Department */}
                                   <div>
                                     <h3 className="font-semibold text-lg text-gray-900 dark:text-white">
-                                      Dr. {user.firstName} {user.lastName}
+                                      Dr. {user?.firstName || ""} {user?.lastName || ""}
                                     </h3>
-                                    {user.department && (
+                                    {displayRoleLabel && (
+                                      <p className="text-sm text-gray-600 dark:text-gray-400 capitalize">
+                                        {displayRoleLabel}
+                                      </p>
+                                    )}
+                                    {user?.department && (
                                       <p className="text-gray-600 dark:text-gray-400">
-                                        {user.department}
+                                        {user?.department}
                                       </p>
                                     )}
                                   </div>
                                   
                                   {/* Additional Information */}
                                   <div className="space-y-2 text-sm">
-                                    {((user as any).medicalSpecialtyCategory || (user as any).specialty) && (
+                                    {(((user as any)?.medicalSpecialtyCategory || (user as any)?.specialty)) && (
                                       <div className="flex items-center gap-2">
                                         <User className="h-4 w-4 text-gray-500" />
                                         <span className="text-gray-700 dark:text-gray-300">
-                                          {(user as any).medicalSpecialtyCategory || (user as any).specialty}
-                                          {(user as any).subSpecialty && ` - ${(user as any).subSpecialty}`}
+                                          {(user as any)?.medicalSpecialtyCategory || (user as any)?.specialty}
+                                          {(user as any)?.subSpecialty && ` - ${(user as any)?.subSpecialty}`}
                                         </span>
                                       </div>
                                     )}
                                     
-                                    {user.email && (
+                                    {user?.email && (
                                       <div className="flex items-center gap-2">
                                         <Mail className="h-4 w-4 text-gray-500" />
-                                        <span className="text-gray-700 dark:text-gray-300">{user.email}</span>
+                                        <span className="text-gray-700 dark:text-gray-300">{user?.email}</span>
                                       </div>
                                     )}
                                   </div>
@@ -3442,7 +3698,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                   <CommandList>
                                     <CommandEmpty>No treatments found.</CommandEmpty>
                                     <CommandGroup>
-                                      {treatmentsList.map((treatment: any) => (
+                                  {doctorTreatmentsCatalog.map((treatment: any) => (
                                         <CommandItem
                                           key={treatment.id}
                                           value={treatment.id.toString()}
@@ -3506,7 +3762,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                                   <CommandList>
                                     <CommandEmpty>No consultations found.</CommandEmpty>
                                     <CommandGroup>
-                                      {consultationServices.map((service: any) => (
+                                      {doctorConsultationsCatalog.map((service: any) => (
                                         <CommandItem
                                           key={service.id}
                                           value={service.id.toString()}
@@ -4062,7 +4318,11 @@ const getAppointmentTypeLabel = (appointment: any): string => {
 
 
                 {/* Book Appointment Button */}
-                {selectedProviderId && selectedDate && selectedTimeSlot && bookingForm.patientId && (
+                {selectedProviderId &&
+                  selectedDate &&
+                  selectedTimeSlot &&
+                  patientReadyForBooking &&
+                  patientHasRequiredServiceSelection && (
                   <div className="flex justify-end gap-2 mt-6 pt-6 border-t">
                     <Button
                       variant="outline"
@@ -4382,6 +4642,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                       data-testid="button-book-appointment"
                     >
                       <Clock className="h-4 w-4 mr-2" />
+                      
                       Book Appointment
                     </Button>
                   </div>
@@ -4424,47 +4685,33 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                   </CardHeader>
                   <CardContent>
                     <div className="space-y-3">
-                      {(() => {
-                        // Find patient by ID - handle both numeric and string patient IDs
-                        const patientId = pendingAppointmentData.patientId;
-                        const patient = patients.find((p: any) => {
-                          // Try exact ID match first
-                          if (p.id === patientId || p.id.toString() === patientId.toString()) {
-                            return true;
-                          }
-                          // Also check patientId field (like P000006)
-                          if (p.patientId === patientId || p.patientId === patientId.toString()) {
-                            return true;
-                          }
-                          return false;
-                        });
-                        
-                        return patient ? (
-                          <>
+                      {pendingAppointmentPatient ? (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <User className="h-4 w-4 text-gray-500" />
+                            <span className="font-medium">Name:</span>
+                            <span>
+                              {pendingAppointmentPatient.firstName} {pendingAppointmentPatient.lastName}
+                            </span>
+                          </div>
+                          {pendingAppointmentPatient.email && (
                             <div className="flex items-center gap-2">
-                              <User className="h-4 w-4 text-gray-500" />
-                              <span className="font-medium">Name:</span>
-                              <span>{patient.firstName} {patient.lastName}</span>
+                              <Mail className="h-4 w-4 text-gray-500" />
+                              <span className="font-medium">Email:</span>
+                              <span>{pendingAppointmentPatient.email}</span>
                             </div>
-                            {patient.email && (
-                              <div className="flex items-center gap-2">
-                                <Mail className="h-4 w-4 text-gray-500" />
-                                <span className="font-medium">Email:</span>
-                                <span>{patient.email}</span>
-                              </div>
-                            )}
-                            {patient.phone && (
-                              <div className="flex items-center gap-2">
-                                <Phone className="h-4 w-4 text-gray-500" />
-                                <span className="font-medium">Phone:</span>
-                                <span>{patient.phone}</span>
-                              </div>
-                            )}
-                          </>
-                        ) : (
-                          <div className="text-gray-500">Patient information not available</div>
-                        );
-                      })()}
+                          )}
+                          {(pendingAppointmentPatient.phone || pendingAppointmentPatient.phoneNumber) && (
+                            <div className="flex items-center gap-2">
+                              <Phone className="h-4 w-4 text-gray-500" />
+                              <span className="font-medium">Phone:</span>
+                              <span>{pendingAppointmentPatient.phone || pendingAppointmentPatient.phoneNumber}</span>
+                            </div>
+                          )}
+                        </>
+                      ) : (
+                        <div className="text-gray-500">Patient information not available</div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
@@ -4763,15 +5010,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     <div>
                       <Label className="text-sm font-medium text-gray-900 dark:text-white">Patient</Label>
                       <Input
-                        value={(() => {
-                          // Match the same patient lookup pattern used in the appointment form
-                          const patient = patients.find((p: any) => 
-                            p.id === pendingAppointmentData.patientId || 
-                            p.id.toString() === pendingAppointmentData.patientId?.toString() ||
-                            p.patientId === pendingAppointmentData.patientId
-                          );
-                          return patient ? `${patient.firstName} ${patient.lastName}` : 'N/A';
-                        })()}
+                        value={invoicePatientName}
                         disabled
                         className="mt-1 bg-gray-50 dark:bg-gray-700"
                       />
@@ -4954,14 +5193,7 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                       <div>
                         <p className="text-sm text-gray-600 dark:text-gray-400">Patient</p>
                         <p className="font-medium text-gray-900 dark:text-white">
-                          {(() => {
-                            const patient = patients.find((p: any) => 
-                              p.id === pendingAppointmentData.patientId || 
-                              p.id.toString() === pendingAppointmentData.patientId?.toString() ||
-                              p.patientId === pendingAppointmentData.patientId
-                            );
-                            return patient ? `${patient.firstName} ${patient.lastName}` : 'N/A';
-                          })()}
+                          {invoicePatientName}
                         </p>
                       </div>
                       <div>
@@ -5060,12 +5292,24 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                     </Button>
                     <Button
                       onClick={() => {
-                        const patient = patients.find((p: any) => 
-                          p.id === pendingAppointmentData.patientId || 
-                          p.id.toString() === pendingAppointmentData.patientId?.toString() ||
-                          p.patientId === pendingAppointmentData.patientId
+                        let patient = patients.find((p: any) => 
+                          p.patientId === pendingAppointmentData.patientId || 
+                          p.id.toString() === pendingAppointmentData.patientId?.toString()
                         );
                         
+                        if (!patient && user?.role === "patient") {
+                          patient = {
+                            id: user?.id,
+                            firstName: user?.firstName,
+                            lastName: user?.lastName,
+                            patientId:
+                              pendingAppointmentData.patientId ||
+                              bookingForm.patientId ||
+                              `P${user?.id?.toString().padStart?.(6, "0") ?? ""}`,
+                            nhsNumber: "",
+                          };
+                        }
+
                         if (!patient) {
                           toast({
                             title: "Error",
@@ -5074,11 +5318,12 @@ const getAppointmentTypeLabel = (appointment: any): string => {
                           });
                           return;
                         }
+                        pendingAppointmentData.patientId = patient.patientId || pendingAppointmentData.patientId;
 
                         // Create invoice data
                         const amount = parseFloat(invoiceForm.amount);
                         const invoiceData = {
-                          patientId: patient.patientId || patient.id.toString(),
+                          patientId: patient.patientId || patient.id?.toString(),
                           patientName: `${patient.firstName} ${patient.lastName}`,
                           nhsNumber: patient.nhsNumber || "",
                           dateOfService: invoiceForm.serviceDate,

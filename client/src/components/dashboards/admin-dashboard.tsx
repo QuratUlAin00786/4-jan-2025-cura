@@ -468,48 +468,7 @@ export function AdminDashboard() {
         </div>
       </div>
 
-      {/* System Roles preview */}
-      <Card>
-        <CardHeader className="flex items-center justify-between">
-          <CardTitle className="text-lg font-semibold">System Roles</CardTitle>
-          <Link href="/user-management?tab=roles">
-            <Button size="sm" variant="ghost" className="gap-1">
-              View Roles
-              <Users className="h-4 w-4" />
-            </Button>
-          </Link>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {rolesQuery.isLoading ? (
-            <div className="text-sm text-gray-500">Loading roles...</div>
-          ) : (
-            roles.slice(0, 4).map((role: any) => (
-              <div key={role.id} className="flex items-center justify-between gap-3 border rounded-lg p-3">
-                <div>
-                  <p className="font-semibold text-gray-900">{role.displayName}</p>
-                  <p className="text-xs text-gray-500">{role.description}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant={role.isSystem ? "secondary" : "default"}>
-                    {role.isSystem ? "System" : "Custom"}
-                  </Badge>
-                  {!role.isSystem && (
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="text-red-600 hover:text-red-700"
-                      onClick={() => handleDeleteRole(role.id, role.displayName)}
-                      data-testid={`admin-delete-role-${role.id}`}
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+      
     </div>
   );
 }

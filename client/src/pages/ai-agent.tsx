@@ -1298,19 +1298,20 @@ export default function AIAgentPage() {
                     </div>
 
                     <div className="flex flex-col">
+                    <div
+                      className={`px-4 py-2 rounded-lg break-words whitespace-pre-line ${
+                        message.type === 'user'
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-gray-100'
+                      }`}
+                    >
                       <div
-                        className={`px-4 py-2 rounded-lg ${
-                          message.type === 'user'
-                            ? 'bg-blue-600 text-white'
-                            : 'bg-gray-100 dark:bg-slate-700 text-gray-900 dark:text-gray-100'
-                        }`}
-                      >
-                        <div
-                          dangerouslySetInnerHTML={{
-                            __html: formatMessageContent(message.content)
-                          }}
-                        />
-                      </div>
+                        className="w-full"
+                        dangerouslySetInnerHTML={{
+                          __html: formatMessageContent(message.content)
+                        }}
+                      />
+                    </div>
 
                       {/* Render main options */}
                       {message.showMainOptions && (
@@ -1456,20 +1457,16 @@ export default function AIAgentPage() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="Ask me to book an appointment, find prescriptions, or help with other tasks..."
-                className="flex-1"
-                disabled={isLoading}
+                placeholder="Ask me anything... (Press Enter to send, Shift+Enter for new line)"
+                className="flex-1 bg-gray-100 dark:bg-gray-800 cursor-not-allowed"
+                disabled
               />
               <Button 
                 onClick={handleSendMessage} 
-                disabled={!input.trim() || isLoading}
+                disabled
                 size="icon"
               >
-                {isLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <Send className="h-4 w-4" />
-                )}
+                <Send className="h-4 w-4" />
               </Button>
             </div>
 

@@ -115,6 +115,36 @@ export function NewAppointmentModal({ isOpen, onClose, onAppointmentCreated }: N
 
   const formData = form.watch();
 
+  const getNormalizedDoctorId = (value?: number | string | null) => {
+    if (value === null || value === undefined || value === "") {
+      return null;
+    }
+    const parsed = typeof value === "number" ? value : Number(value);
+    return Number.isNaN(parsed) ? null : parsed;
+  };
+
+  const getNormalizedDoctorRole = (value?: string | null) => {
+    if (!value) {
+      return "";
+    }
+    return value.toString().trim().toLowerCase();
+  };
+
+  const normalizeText = (value?: string | null) =>
+    value ? value.toString().trim().toLowerCase() : "";
+
+  const selectedProviderName = useMemo(() => {
+    const providerId = getNormalizedDoctorId(formData.providerId);
+    if (providerId === null) {
+      return "";
+    }
+    const provider = allProviders.find((p) => p.id === providerId);
+    if (!provider) {
+      return "";
+    }
+    return normalizeText(`${provider.firstName || ""} ${provider.lastName || ""}`);
+  }, [formData.providerId, allProviders]);
+
   useEffect(() => {
     if (formData.appointmentType === "treatment") {
       if (form.getValues("consultationId")) {
@@ -244,18 +274,6 @@ export function NewAppointmentModal({ isOpen, onClose, onAppointmentCreated }: N
     enabled: !!user,
   });
 
-  const { data: consultationServicesData = [] } = useQuery({
-    queryKey: ["/api/pricing/doctors-fees"],
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/pricing/doctors-fees");
-      if (!response.ok) {
-        throw new Error("Failed to fetch consultation services");
-      }
-      return await response.json();
-    },
-    enabled: !!user,
-  });
-
   const providerRoles = useMemo(() => {
     const rolesSet = new Set<string>();
     allProviders.forEach((provider) => {
@@ -276,17 +294,77 @@ export function NewAppointmentModal({ isOpen, onClose, onAppointmentCreated }: N
         provider.role?.toLowerCase() === formData.providerRole.toLowerCase(),
     );
   }, [availableProviders, formData.providerRole]);
-  const { data: treatmentsData = [] } = useQuery({
-    queryKey: ["/api/pricing/treatments"],
-    queryFn: async () => {
-      const response = await apiRequest("GET", "/api/pricing/treatments");
-      if (!response.ok) {
-        throw new Error("Failed to fetch treatments");
-      }
-      return await response.json();
-    },
-    enabled: !!user,
-  });
+  const availableTreatments = useMemo(() => {
+    if (!user) return [];
+    const roleLower = user.role?.toLowerCase();
+    const normalizedRole = roleLower || "";
+
+    const selectedProviderId = getNormalizedDoctorId(formData.providerId);
+    const selectedRole = getNormalizedDoctorRole(formData.providerRole);
+
+    const baseTreatments = normalizedRole === "doctor"
+      ? (treatmentsData || []).filter((treatment: any) => {
+          const entryDoctorId = getNormalizedDoctorId(
+            treatment.doctorId ?? treatment.doctor_id,
+          );
+          const entryRole = getNormalizedDoctorRole(
+            treatment.doctorRole ?? treatment.doctor_role,
+          );
+          const matchesById =
+            entryDoctorId !== null && entryDoctorId === user.id;
+          const matchesByRole =
+            entryRole && entryRole === normalizedRole;
+          return matchesById || matchesByRole;
+        })
+      : treatmentsData || [];
+
+    return baseTreatments.filter((treatment: any) => {
+      const entryDoctorId = getNormalizedDoctorId(
+        treatment.doctorId ?? treatment.doctor_id,
+      );
+      const entryRole = getNormalizedDoctorRole(
+        treatment.doctorRole ?? treatment.doctor_role,
+      );
+      const entryDoctorName = normalizeText(
+        treatment.doctorName ?? treatment.doctor_name,
+      );
+      const matchesProviderByName =
+        selectedProviderName &&
+        entryDoctorName === selectedProviderName;
+      const matchesProvider =
+        selectedProviderId === null ||
+        entryDoctorId === selectedProviderId ||
+        matchesProviderByName;
+      const matchesRole = !selectedRole || entryRole === selectedRole;
+      return matchesProvider && matchesRole;
+    });
+  }, [treatmentsData, user, formData.providerId, formData.providerRole]);
+
+  const filteredConsultationServices = useMemo(() => {
+    const selectedProviderId = getNormalizedDoctorId(formData.providerId);
+    const selectedRole = getNormalizedDoctorRole(formData.providerRole);
+
+    return (consultationServicesData || []).filter((service: any) => {
+      const entryDoctorId = getNormalizedDoctorId(
+        service.doctorId ?? service.doctor_id,
+      );
+      const entryRole = getNormalizedDoctorRole(
+        service.doctorRole ?? service.doctor_role,
+      );
+      const entryDoctorName = normalizeText(
+        service.doctorName ?? service.doctor_name,
+      );
+      const matchesProviderByName =
+        selectedProviderName &&
+        entryDoctorName === selectedProviderName;
+      const matchesProvider =
+        selectedProviderId === null ||
+        entryDoctorId === selectedProviderId ||
+        matchesProviderByName;
+      const matchesRole = !selectedRole || entryRole === selectedRole;
+      return matchesProvider && matchesRole;
+    });
+  }, [consultationServicesData, formData.providerId, formData.providerRole]);
 
   const { data: consultationServicesData = [] } = useQuery({
     queryKey: ["/api/pricing/doctors-fees"],
@@ -865,16 +943,24 @@ export function NewAppointmentModal({ isOpen, onClose, onAppointmentCreated }: N
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {treatmentsData.map((treatment: any) => (
-                            <SelectItem key={`treatment-${treatment.id}`} value={treatment.id.toString()}>
-                              <div className="flex justify-between">
-                                <span>{treatment.name}</span>
-                                <span className="text-xs text-gray-500">
-                                  {treatment.currency || "GBP"} {treatment.basePrice}
-                                </span>
-                              </div>
+                          {availableTreatments.length === 0 ? (
+                            <SelectItem value="" disabled>
+                              {user?.role === "doctor"
+                                ? "No treatments assigned to your role"
+                                : "No treatments available"}
                             </SelectItem>
-                          ))}
+                          ) : (
+                            availableTreatments.map((treatment: any) => (
+                              <SelectItem key={`treatment-${treatment.id}`} value={treatment.id.toString()}>
+                                <div className="flex justify-between">
+                                  <span>{treatment.name}</span>
+                                  <span className="text-xs text-gray-500">
+                                    {treatment.currency || "GBP"} {treatment.basePrice}
+                                  </span>
+                                </div>
+                              </SelectItem>
+                            ))
+                          )}
                         </SelectContent>
                       </Select>
                       <FormMessage />
@@ -897,7 +983,7 @@ export function NewAppointmentModal({ isOpen, onClose, onAppointmentCreated }: N
                           </SelectTrigger>
                         </FormControl>
                         <SelectContent>
-                          {consultationServicesData.map((service: any) => (
+                          {filteredConsultationServices.map((service: any) => (
                             <SelectItem key={`consultation-${service.id}`} value={service.id.toString()}>
                               <div className="flex justify-between">
                                 <span>{service.service_name}</span>

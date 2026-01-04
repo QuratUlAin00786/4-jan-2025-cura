@@ -3570,6 +3570,9 @@ export const imagingPricing = pgTable("imaging_pricing", {
 export const treatments = pgTable("treatments", {
   id: serial("id").primaryKey(),
   organizationId: integer("organization_id").notNull().references(() => organizations.id),
+  doctorId: integer("doctor_id").references(() => users.id),
+  doctorName: text("doctor_name"),
+  doctorRole: varchar("doctor_role", { length: 50 }),
   name: text("name").notNull(),
   colorCode: varchar("color_code", { length: 7 }).notNull().default("#2563eb"),
   basePrice: decimal("base_price", { precision: 10, scale: 2 }).notNull().default(0),
@@ -3608,6 +3611,23 @@ export const insertTreatmentSchema = createInsertSchema(treatments).omit({
   updatedAt: true,
 });
 
+// Treatments Info Table
+export const treatmentsInfo = pgTable("treatments_info", {
+  id: serial("id").primaryKey(),
+  organizationId: integer("organization_id").notNull().references(() => organizations.id),
+  name: text("name").notNull(),
+  colorCode: varchar("color_code", { length: 7 }).notNull().default("#2563eb"),
+  createdBy: integer("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
+export const insertTreatmentsInfoSchema = createInsertSchema(treatmentsInfo).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
 // Pricing Types
 export type DoctorsFee = typeof doctorsFee.$inferSelect;
 export type InsertDoctorsFee = z.infer<typeof insertDoctorsFeeSchema>;
@@ -3619,6 +3639,8 @@ export type ImagingPricing = typeof imagingPricing.$inferSelect;
 export type InsertImagingPricing = z.infer<typeof insertImagingPricingSchema>;
 export type Treatment = typeof treatments.$inferSelect;
 export type InsertTreatment = z.infer<typeof insertTreatmentSchema>;
+export type TreatmentsInfo = typeof treatmentsInfo.$inferSelect;
+export type InsertTreatmentsInfo = z.infer<typeof insertTreatmentsInfoSchema>;
 
 // QuickBooks Insert Schemas
 export const insertQuickBooksConnectionSchema = createInsertSchema(quickbooksConnections).omit({

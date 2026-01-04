@@ -30,6 +30,12 @@ export function multiTenantEnforcer(config: Partial<MultiTenantEnforcementConfig
 
   return async (req: TenantRequest, res: Response, next: NextFunction) => {
     try {
+      // If tenant middleware wasn't wired up yet, derive organizationId from the authenticated user
+      if (!req.organizationId && req.user?.organizationId) {
+        req.organizationId = req.user.organizationId;
+        console.log(`[MULTI-TENANT] Derived organizationId ${req.organizationId} from authenticated user`);
+      }
+
       // Ensure tenant context exists
       // Allow organizationId: 0 for system-wide SaaS operations
       if (enforcementConfig.enforceOrganizationId && (req.organizationId === null || req.organizationId === undefined)) {

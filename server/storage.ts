@@ -1,6 +1,6 @@
 import { isDoctorLike } from './utils/role-utils.js';
 import { 
-  organizations, users, patients, medicalRecords, appointments, invoices, payments, aiInsights, subscriptions, patientCommunications, consultations, notifications, prescriptions, documents, medicalImages, clinicalPhotos, labResults, riskAssessments, claims, revenueRecords, insuranceVerifications, clinicalProcedures, emergencyProtocols, medicationsDatabase, roles, staffShifts, doctorDefaultShifts, gdprConsents, gdprDataRequests, gdprAuditTrail, gdprProcessingActivities, conversations as conversationsTable, messages, messageCampaigns, messageTemplates, voiceNotes, saasOwners, saasPackages, saasSubscriptions, saasPayments, saasInvoices, saasSettings, chatbotConfigs, chatbotSessions, chatbotMessages, chatbotAnalytics, musclePositions, userDocumentPreferences, letterDrafts, forecastModels, financialForecasts, quickbooksConnections, quickbooksSyncLogs, quickbooksCustomerMappings, quickbooksInvoiceMappings, quickbooksPaymentMappings, quickbooksAccountMappings, quickbooksItemMappings, quickbooksSyncConfigs, doctorsFee, labTestPricing, imagingPricing, treatments, clinicHeaders, clinicFooters, symptomChecks,
+  organizations, users, patients, medicalRecords, appointments, invoices, payments, aiInsights, subscriptions, patientCommunications, consultations, notifications, prescriptions, documents, medicalImages, clinicalPhotos, labResults, riskAssessments, claims, revenueRecords, insuranceVerifications, clinicalProcedures, emergencyProtocols, medicationsDatabase, roles, staffShifts, doctorDefaultShifts, gdprConsents, gdprDataRequests, gdprAuditTrail, gdprProcessingActivities, conversations as conversationsTable, messages, messageCampaigns, messageTemplates, voiceNotes, saasOwners, saasPackages, saasSubscriptions, saasPayments, saasInvoices, saasSettings, chatbotConfigs, chatbotSessions, chatbotMessages, chatbotAnalytics, musclePositions, userDocumentPreferences, letterDrafts, forecastModels, financialForecasts, quickbooksConnections, quickbooksSyncLogs, quickbooksCustomerMappings, quickbooksInvoiceMappings, quickbooksPaymentMappings, quickbooksAccountMappings, quickbooksItemMappings, quickbooksSyncConfigs, doctorsFee, labTestPricing, imagingPricing, treatments, treatmentsInfo, clinicHeaders, clinicFooters, symptomChecks,
   type Organization, type InsertOrganization,
   type User, type InsertUser,
   type Role, type InsertRole,
@@ -63,6 +63,7 @@ import {
   type LabTestPricing, type InsertLabTestPricing,
   type ImagingPricing, type InsertImagingPricing,
   type Treatment, type InsertTreatment,
+  type TreatmentsInfo, type InsertTreatmentsInfo,
   type ClinicHeader, type InsertClinicHeader,
   type ClinicFooter, type InsertClinicFooter
 } from "@shared/schema";
@@ -615,6 +616,11 @@ export interface IStorage {
   createTreatment(treatment: InsertTreatment): Promise<Treatment>;
   updateTreatment(id: number, organizationId: number, updates: Partial<InsertTreatment>): Promise<Treatment | undefined>;
   deleteTreatment(id: number, organizationId: number): Promise<boolean>;
+  // Treatments Info
+  getTreatmentsInfo(organizationId: number): Promise<TreatmentsInfo[]>;
+  createTreatmentsInfo(info: InsertTreatmentsInfo): Promise<TreatmentsInfo>;
+  updateTreatmentsInfo(id: number, organizationId: number, updates: Partial<InsertTreatmentsInfo>): Promise<TreatmentsInfo | undefined>;
+  deleteTreatmentsInfo(id: number, organizationId: number): Promise<boolean>;
   
   // Clinic Headers
   createClinicHeader(header: InsertClinicHeader): Promise<ClinicHeader>;
@@ -1970,7 +1976,7 @@ export class DatabaseStorage implements IStorage {
 
   // Notifications
   async getNotifications(userId: number, organizationId: number, limit = 20): Promise<Notification[]> {
-    return await db
+    let query = db
       .select()
       .from(notifications)
       .where(and(
@@ -1978,20 +1984,41 @@ export class DatabaseStorage implements IStorage {
         eq(notifications.organizationId, organizationId),
         not(eq(notifications.status, 'archived'))
       ))
-      .orderBy(desc(notifications.createdAt))
-      .limit(limit);
+      .orderBy(desc(notifications.createdAt));
+
+    if (limit > 0) {
+      query = query.limit(limit);
+    }
+
+    return await query;
   }
 
   async getNotificationsByOrganization(organizationId: number, limit = 20): Promise<Notification[]> {
-    return await db
+    let query = db
       .select()
       .from(notifications)
       .where(and(
         eq(notifications.organizationId, organizationId),
         not(eq(notifications.status, 'archived'))
       ))
-      .orderBy(desc(notifications.createdAt))
-      .limit(limit);
+      .orderBy(desc(notifications.createdAt));
+
+    if (limit > 0) {
+      query = query.limit(limit);
+    }
+
+    return await query;
+  }
+
+  async getNotificationCountByOrganization(organizationId: number): Promise<number> {
+    const [result] = await db
+      .select({ count: count() })
+      .from(notifications)
+      .where(and(
+        eq(notifications.organizationId, organizationId),
+        not(eq(notifications.status, 'archived'))
+      ));
+    return result?.count || 0;
   }
 
   async getUnreadNotificationCount(userId: number, organizationId: number): Promise<number> {
@@ -7743,11 +7770,17 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getTreatments(organizationId: number): Promise<Treatment[]> {
-    return await db
+    const results = await db
       .select()
       .from(treatments)
       .where(eq(treatments.organizationId, organizationId))
       .orderBy(desc(treatments.createdAt));
+    
+    console.log(`Fetched ${results.length} treatments for org ${organizationId}`);
+    if (results.length > 0) {
+      console.log("Sample treatment data:", JSON.stringify(results[0], null, 2));
+    }
+    return results;
   }
 
   async getTreatment(id: number, organizationId: number): Promise<Treatment | undefined> {
@@ -7759,17 +7792,21 @@ export class DatabaseStorage implements IStorage {
   }
 
   async createTreatment(treatment: InsertTreatment): Promise<Treatment> {
+    console.log("Saving treatment to database:", JSON.stringify(treatment, null, 2));
     const [created] = await db.insert(treatments).values([treatment]).returning();
+    console.log("Treatment saved successfully:", JSON.stringify(created, null, 2));
     return created;
   }
 
   async updateTreatment(id: number, organizationId: number, updates: Partial<InsertTreatment>): Promise<Treatment | undefined> {
+    console.log(`Updating treatment ${id} in database:`, JSON.stringify(updates, null, 2));
     const updateData = { ...updates, updatedAt: new Date() };
     const [updated] = await db
       .update(treatments)
       .set(updateData)
       .where(and(eq(treatments.id, id), eq(treatments.organizationId, organizationId)))
       .returning();
+    console.log("Treatment updated successfully:", JSON.stringify(updated, null, 2));
     return updated || undefined;
   }
 
@@ -7777,6 +7814,36 @@ export class DatabaseStorage implements IStorage {
     const result = await db
       .delete(treatments)
       .where(and(eq(treatments.id, id), eq(treatments.organizationId, organizationId)));
+    return result.rowCount > 0;
+  }
+
+  async getTreatmentsInfo(organizationId: number): Promise<TreatmentsInfo[]> {
+    return await db
+      .select()
+      .from(treatmentsInfo)
+      .where(eq(treatmentsInfo.organizationId, organizationId))
+      .orderBy(desc(treatmentsInfo.createdAt));
+  }
+
+  async createTreatmentsInfo(info: InsertTreatmentsInfo): Promise<TreatmentsInfo> {
+    const [created] = await db.insert(treatmentsInfo).values([info]).returning();
+    return created;
+  }
+
+  async updateTreatmentsInfo(id: number, organizationId: number, updates: Partial<InsertTreatmentsInfo>): Promise<TreatmentsInfo | undefined> {
+    const updateData = { ...updates, updatedAt: new Date() };
+    const [updated] = await db
+      .update(treatmentsInfo)
+      .set(updateData)
+      .where(and(eq(treatmentsInfo.id, id), eq(treatmentsInfo.organizationId, organizationId)))
+      .returning();
+    return updated || undefined;
+  }
+
+  async deleteTreatmentsInfo(id: number, organizationId: number): Promise<boolean> {
+    const result = await db
+      .delete(treatmentsInfo)
+      .where(and(eq(treatmentsInfo.id, id), eq(treatmentsInfo.organizationId, organizationId)));
     return result.rowCount > 0;
   }
 

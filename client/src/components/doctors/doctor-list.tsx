@@ -398,6 +398,34 @@ export function DoctorList({
     },
   });
 
+  const doctorTreatments = useMemo(() => {
+    if (!selectedBookingDoctor) return treatmentsList;
+    const doctorId = selectedBookingDoctor.id;
+    return treatmentsList.filter((treatment: any) => {
+      if (treatment.doctor_id !== undefined && Number(treatment.doctor_id) === doctorId) {
+        return true;
+      }
+      if (treatment.doctorId !== undefined && Number(treatment.doctorId) === doctorId) {
+        return true;
+      }
+      return false;
+    });
+  }, [selectedBookingDoctor, treatmentsList]);
+
+  const doctorConsultations = useMemo(() => {
+    if (!selectedBookingDoctor) return consultationServices;
+    const doctorId = selectedBookingDoctor.id;
+    return consultationServices.filter((service: any) => {
+      if (service.doctor_id !== undefined && Number(service.doctor_id) === doctorId) {
+        return true;
+      }
+      if (service.doctorId !== undefined && Number(service.doctorId) === doctorId) {
+        return true;
+      }
+      return false;
+    });
+  }, [selectedBookingDoctor, consultationServices]);
+
   const treatmentsMap = useMemo(() => {
     const map = new Map<number, any>();
     treatmentsList.forEach((treatment: any) => {
@@ -968,7 +996,7 @@ const bookingSummaryServiceInfo = useMemo(
     }
 
     if (appointmentType === "treatment" && !selectedTreatment) {
-      setTreatmentSelectionError("Please select a treatment.");
+      setTreatmentSelectionError("Please select treatment type.");
       return;
     }
 
@@ -1178,7 +1206,7 @@ const bookingSummaryServiceInfo = useMemo(
     }
     setSelectedDate(undefined);
     setSelectedTimeSlot("");
-    setAppointmentType("Consultation");
+    setAppointmentType("consultation");
     setDuration("30");
     setAppointmentTitle("");
     setAppointmentDescription("");
@@ -1924,9 +1952,13 @@ const bookingSummaryServiceInfo = useMemo(
                         <Command>
                           <CommandInput placeholder="Search treatments..." />
                           <CommandList>
-                            <CommandEmpty>No treatments found.</CommandEmpty>
+                            <CommandEmpty>
+                              {selectedBookingDoctor
+                                ? `No treatments available for Dr. ${selectedBookingDoctor.firstName} ${selectedBookingDoctor.lastName}.`
+                                : "No treatments found."}
+                            </CommandEmpty>
                             <CommandGroup>
-                              {treatmentsList.map((treatment: any) => (
+                              {doctorTreatments.map((treatment: any) => (
                                 <CommandItem
                                   key={treatment.id}
                                   value={String(treatment.id)}
@@ -1980,9 +2012,13 @@ const bookingSummaryServiceInfo = useMemo(
                         <Command>
                           <CommandInput placeholder="Search consultations..." />
                           <CommandList>
-                            <CommandEmpty>No consultations found.</CommandEmpty>
+                            <CommandEmpty>
+                              {selectedBookingDoctor
+                                ? `No consultations available for Dr. ${selectedBookingDoctor.firstName} ${selectedBookingDoctor.lastName}.`
+                                : "No consultations found."}
+                            </CommandEmpty>
                             <CommandGroup>
-                              {consultationServices.map((service: any) => (
+                              {doctorConsultations.map((service: any) => (
                                 <CommandItem
                                   key={service.id}
                                   value={String(service.id)}

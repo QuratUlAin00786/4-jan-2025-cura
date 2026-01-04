@@ -1982,8 +1982,8 @@ export function AIChatWidget() {
                   onChange={(e) => setInput(e.target.value)}
                   onKeyPress={handleKeyPress}
                   placeholder="Ask me anything... (Press Enter to send, Shift+Enter for new line)"
-                  disabled={isLoading}
-                  className="pr-10 min-h-[40px] max-h-[120px] resize-none"
+                  disabled
+                  className="pr-10 min-h-[40px] max-h-[120px] resize-none bg-gray-100 dark:bg-gray-800 cursor-not-allowed"
                   rows={1}
                 />
                 <Button

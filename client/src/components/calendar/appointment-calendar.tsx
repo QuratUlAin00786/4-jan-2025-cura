@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,18 @@ import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameDay, isToday
 
 const anatomicalDiagramImage = "/anatomical-diagram-clean.svg";
 const facialDiagramImage = "/clean-facial-diagram.png";
+const formatAppointmentTimeUTC = (iso?: string) => {
+  if (!iso) return undefined;
+  const match = iso.match(/T(\d{2}):(\d{2})/);
+  if (!match) return undefined;
+  const hours = parseInt(match[1], 10);
+  const minutes = parseInt(match[2], 10);
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return undefined;
+  const period = hours >= 12 ? "PM" : "AM";
+  const twelveHour = hours % 12 || 12;
+  const minuteString = minutes.toString().padStart(2, "0");
+  return `${twelveHour}:${minuteString} ${period}`;
+};
 import { useToast } from "@/hooks/use-toast";
 import { useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
@@ -57,6 +69,42 @@ const typeBgColors = {
   consultation: "#7279FB",  // Electric Lilac
   follow_up: "#C073FF",     // Electric Violet
   procedure: "#4A7DFF"      // Bluewave
+};
+
+type ServiceFilterContext = {
+  role?: string;
+  providerId?: string;
+  providerNameLower?: string;
+};
+
+const matchesDoctorSelection = (item: any, context: ServiceFilterContext): boolean => {
+  if (!item || !context) return false;
+  const entryRole = item.doctorRole?.toString().trim().toLowerCase() || "";
+  const roleMatch =
+    !context.role || !entryRole || entryRole === context.role;
+  if (!roleMatch) return false;
+
+  if (!context.providerId && !context.providerNameLower) {
+    return true;
+  }
+
+  if (context.providerId && item.doctorId && item.doctorId.toString() === context.providerId) {
+    return true;
+  }
+
+  if (context.providerNameLower && item.doctorName) {
+    const entryName = item.doctorName.toString().trim().toLowerCase();
+    if (entryName === context.providerNameLower) {
+      return true;
+    }
+  }
+
+  return false;
+};
+
+const capitalizeRoleLabel = (value?: string) => {
+  if (!value) return "";
+  return value.charAt(0).toUpperCase() + value.slice(1);
 };
 
 // Wrapper component to fetch patient data and pass to FullConsultationInterface
@@ -1327,12 +1375,77 @@ Medical License: [License Number]
     return patient ? `${patient.firstName} ${patient.lastName}` : `Patient ${patientId}`;
   };
 
+  const selectedProvider = useMemo(() => {
+    if (!selectedProviderId) return null;
+    return filteredUsers.find((user: any) => user.id.toString() === selectedProviderId) || null;
+  }, [filteredUsers, selectedProviderId]);
+
   const getProviderName = (providerId: number) => {
     if (!usersData || !Array.isArray(usersData)) return `Provider ${providerId}`;
     const provider = usersData.find((u: any) => u.id === providerId);
     console.log(`[Calendar] Looking up provider ${providerId}:`, provider);
     return provider ? `${provider.firstName || ''} ${provider.lastName || ''}`.trim() : `Provider ${providerId}`;
   };
+
+  const selectedProviderNameLower = selectedProvider
+    ? `${selectedProvider.firstName || ""} ${selectedProvider.lastName || ""}`.trim().toLowerCase()
+    : "";
+
+  const editProviderInfo = useMemo(() => {
+    if (!editingAppointment) return null;
+    const provider = usersData?.find((user: any) => user.id === editingAppointment.providerId);
+    const providerFullName = provider
+      ? `${provider.firstName || ""} ${provider.lastName || ""}`.trim()
+      : "";
+    const fallbackName = providerFullName || `Provider ${editingAppointment.providerId ?? "Unknown"}`;
+    const rawRole =
+      provider?.role ||
+      editingAppointment.assignedRole ||
+      editingAppointment.providerRole ||
+      editingAppointment.doctorRole ||
+      "";
+    const normalizedRole = rawRole.toString().trim().toLowerCase();
+    return {
+      providerId: editingAppointment.providerId?.toString() || "",
+      role: normalizedRole,
+      providerName: fallbackName,
+      providerNameLower: providerFullName.toLowerCase(),
+    };
+  }, [editingAppointment, usersData]);
+
+  const newAppointmentFilterContext = useMemo<ServiceFilterContext | null>(() => {
+    if (!showNewAppointment || !selectedRole || !selectedProviderId) return null;
+    return {
+      role: selectedRole.toLowerCase().trim(),
+      providerId: selectedProviderId,
+      providerNameLower: selectedProviderNameLower,
+    };
+  }, [showNewAppointment, selectedRole, selectedProviderId, selectedProviderNameLower]);
+
+  const editAppointmentFilterContext = useMemo<ServiceFilterContext | null>(() => {
+    if (!showEditAppointment || !editProviderInfo) return null;
+    return {
+      role: editProviderInfo.role,
+      providerId: editProviderInfo.providerId,
+      providerNameLower: editProviderInfo.providerNameLower,
+    };
+  }, [showEditAppointment, editProviderInfo]);
+
+  const activeServiceFilterContext = editAppointmentFilterContext || newAppointmentFilterContext;
+
+  const filteredTreatmentsForSelection = useMemo(() => {
+    if (!activeServiceFilterContext) return treatmentsList;
+    return treatmentsList.filter((treatment: any) =>
+      matchesDoctorSelection(treatment, activeServiceFilterContext)
+    );
+  }, [treatmentsList, activeServiceFilterContext]);
+
+  const filteredConsultationsForSelection = useMemo(() => {
+    if (!activeServiceFilterContext) return consultationServices;
+    return consultationServices.filter((service: any) =>
+      matchesDoctorSelection(service, activeServiceFilterContext)
+    );
+  }, [consultationServices, activeServiceFilterContext]);
 
   const getCreatedByUser = (createdById: number | null | undefined) => {
     if (!createdById || !usersData || !Array.isArray(usersData)) return null;
@@ -1776,7 +1889,7 @@ Medical License: [License Number]
       </Card>
 
       {/* Appointment Details Dialog */}
-      <Dialog open={showAppointmentDetails} onOpenChange={setShowAppointmentDetails}>
+        <Dialog open={showAppointmentDetails} onOpenChange={setShowAppointmentDetails}>
         <DialogContent className="max-w-2xl">
           {selectedAppointment && (
             <div>
@@ -1784,11 +1897,51 @@ Medical License: [License Number]
                 <DialogTitle className="text-xl font-bold text-blue-800">
                   Appointment Details
                 </DialogTitle>
-                <DialogDescription>
-                  {format(new Date(selectedAppointment.scheduledAt), "EEEE, MMMM d, yyyy 'at' h:mm a")}
-                </DialogDescription>
+                  <DialogDescription>
+                    {selectedAppointment.displayDate ||
+                      selectedAppointment.appointmentDate ||
+                      format(new Date(selectedAppointment.scheduledAt), "EEEE, MMMM d, yyyy")}
+                  </DialogDescription>
               </DialogHeader>
               
+                <div className="bg-white dark:bg-slate-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-3 mt-4 shadow-sm">
+                  <div className="flex items-center justify-between text-xs uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    <span>{selectedAppointment.status?.toUpperCase() || "Scheduled"}</span>
+                    <span>
+                      {selectedAppointment.startTime ||
+                        selectedAppointment.time ||
+                        selectedAppointment.timeSlot ||
+                        formatAppointmentTimeUTC(selectedAppointment.scheduledAt) ||
+                        "Time not set"}
+                    </span>
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-sm font-medium text-gray-800 dark:text-gray-100">
+                      {getPatientName(selectedAppointment.patientId)}
+                    </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Service: {selectedAppointment.service || selectedAppointment.appointmentType || "N/A"}
+                      </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {selectedAppointment.duration || 30} minutes
+                    </p>
+                  </div>
+                  <div className="mt-2">
+                    <p className="text-xs text-gray-500 dark:text-gray-400">Provider</p>
+                      <p className="text-sm text-gray-800 dark:text-gray-100">
+                        {selectedAppointment.providerName ||
+                          getProviderName(selectedAppointment.providerId) ||
+                          "Unknown Provider"}
+                      </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {selectedAppointment.providerSpecialty || selectedAppointment.specialty || "General"}
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      Created By: {selectedAppointment.createdByName || `${getPatientName(selectedAppointment.createdBy)} (patient)` || "N/A"}
+                    </p>
+                  </div>
+                </div>
+
               <div className="space-y-4 mt-6">
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -1823,38 +1976,38 @@ Medical License: [License Number]
                   </div>
                 </div>
                 
-                <div>
-                  <Label className="text-sm font-medium text-gray-600">Description</Label>
-                  <p className="mt-1">{selectedAppointment.description}</p>
-                </div>
+                {selectedAppointment.description?.trim() ? (
+                  <div>
+                    <Label className="text-sm font-medium text-gray-600">Description</Label>
+                    <p className="mt-1">{selectedAppointment.description}</p>
+                  </div>
+                ) : null}
                 
-                <div className="flex items-center space-x-2">
-                  <MapPin className="h-4 w-4 text-gray-400" />
-                  <span>{selectedAppointment.location}</span>
-                  {selectedAppointment.isVirtual && (
+                {selectedAppointment.location?.trim() ? (
+                  <div className="flex items-center space-x-2">
+                    <MapPin className="h-4 w-4 text-gray-400" />
+                    <span>{selectedAppointment.location}</span>
+                    {selectedAppointment.isVirtual && (
+                      <Badge variant="outline" className="ml-2">
+                        <Video className="h-3 w-3 mr-1" />
+                        Virtual
+                      </Badge>
+                    )}
+                  </div>
+                ) : selectedAppointment.isVirtual ? (
+                  <div className="flex items-center space-x-2">
                     <Badge variant="outline" className="ml-2">
                       <Video className="h-3 w-3 mr-1" />
                       Virtual
                     </Badge>
-                  )}
-                </div>
+                  </div>
+                ) : null}
               </div>
 
-              <div className="flex justify-between mt-6">
-                <div className="flex space-x-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      setShowFullConsultation(true);
-                    }}
-                    className="flex items-center space-x-2 bg-blue-50 border-blue-300 text-blue-700 hover:bg-blue-100"
-                  >
-                    <Stethoscope className="h-4 w-4" />
-                    <span>Add Medical Record</span>
-                  </Button>
-                </div>
+              <div className="flex justify-end gap-2 mt-6">
                 <Button
                   variant="destructive"
+                  className="px-4 py-2 font-semibold"
                   onClick={async () => {
                     try {
                       await apiRequest("DELETE", `/api/appointments/${selectedAppointment.id}`);
@@ -1887,7 +2040,11 @@ Medical License: [License Number]
                 >
                   Delete
                 </Button>
-                <Button variant="outline" onClick={() => setShowAppointmentDetails(false)}>
+                <Button
+                  variant="outline"
+                  className="px-4 py-2"
+                  onClick={() => setShowAppointmentDetails(false)}
+                >
                   Close
                 </Button>
               </div>
@@ -2307,7 +2464,7 @@ Medical License: [License Number]
                                 )}
                                 <CommandEmpty>No treatments found.</CommandEmpty>
                                 <CommandGroup>
-                                  {treatmentsList.map((treatment: any) => (
+                                    {filteredTreatmentsForSelection.map((treatment: any) => (
                                     <CommandItem
                                       key={treatment.id}
                                       value={treatment.id.toString()}
@@ -2377,7 +2534,7 @@ Medical License: [License Number]
                                 )}
                                 <CommandEmpty>No consultations found.</CommandEmpty>
                                 <CommandGroup>
-                                  {consultationServices.map((service: any) => (
+                                  {filteredConsultationsForSelection.map((service: any) => (
                                     <CommandItem
                                       key={service.id}
                                       value={service.id.toString()}
@@ -3435,6 +3592,26 @@ Medical License: [License Number]
                   Update appointment details for {getPatientName(editingAppointment.patientId)}
                 </DialogDescription>
               </DialogHeader>
+              {editProviderInfo && (
+                <div className="mb-4 flex flex-wrap gap-6 text-sm text-gray-600 dark:text-gray-300">
+                  <div>
+                    <p className="text-[0.65rem] uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Role
+                    </p>
+                    <p className="font-semibold text-gray-900 dark:text-white">
+                      {capitalizeRoleLabel(editProviderInfo.role) || "Role not set"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[0.65rem] uppercase tracking-wider text-gray-500 dark:text-gray-400">
+                      Provider
+                    </p>
+                    <p className="font-semibold text-gray-900 dark:text-white">
+                      {editProviderInfo.providerName}
+                    </p>
+                  </div>
+                </div>
+              )}
               
               <div className="space-y-6">
                 {/* Title and Duration Row */}
@@ -3555,7 +3732,7 @@ Medical License: [License Number]
                                 )}
                                 <CommandEmpty>No treatments found.</CommandEmpty>
                                 <CommandGroup>
-                                  {treatmentsList.map((treatment: any) => (
+                                  {filteredTreatmentsForSelection.map((treatment: any) => (
                                     <CommandItem
                                       key={treatment.id}
                                       value={treatment.id.toString()}
@@ -3624,7 +3801,7 @@ Medical License: [License Number]
                                 )}
                                 <CommandEmpty>No consultations found.</CommandEmpty>
                                 <CommandGroup>
-                                  {consultationServices.map((service: any) => (
+                                  {filteredConsultationsForSelection.map((service: any) => (
                                     <CommandItem
                                       key={service.id}
                                       value={service.id.toString()}

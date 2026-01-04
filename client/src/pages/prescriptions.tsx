@@ -57,6 +57,7 @@ import {
   Paperclip,
   X,
   ChevronsUpDown,
+  RefreshCw,
 } from "lucide-react";
 import { format } from "date-fns";
 import { useAuth } from "@/hooks/use-auth";
@@ -226,6 +227,25 @@ const getSeverityColor = (severity: string) => {
     default:
       return "bg-gray-100 text-gray-800";
   }
+};
+
+const getUserFullName = (user: any) => {
+  if (!user) return "";
+  const firstName = user.firstName ?? user.first_name ?? user.givenName ?? user.given_name ?? "";
+  const lastName = user.lastName ?? user.last_name ?? user.familyName ?? user.family_name ?? "";
+  return `${firstName} ${lastName}`.trim();
+};
+
+const getDoctorLabel = (user: any) => {
+  const fullName = getUserFullName(user);
+  if (!fullName) {
+    return `Provider ${user?.id ?? "unknown"}`;
+  }
+  const roleHint = user?.role?.toString().toLowerCase() || "";
+  if (roleHint.includes("doctor")) {
+    return `Dr. ${fullName}`;
+  }
+  return fullName;
 };
 
 const COMMON_DIAGNOSES = [
@@ -429,10 +449,14 @@ export default function PrescriptionsPage() {
   const { user } = useAuth();
   const { canCreate, canEdit, canDelete } = useRolePermissions();
   const [, setLocation] = useLocation();
+  const [searchInput, setSearchInput] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [prescriptionIdFilter, setPrescriptionIdFilter] = useState<string>("all");
+  const [doctorFilter, setDoctorFilter] = useState<string>("");
+  const [patientNameFilter, setPatientNameFilter] = useState<string>("");
   const [prescriptionIdPopoverOpen, setPrescriptionIdPopoverOpen] = useState(false);
+  const [prescriptionSearchPreviewId, setPrescriptionSearchPreviewId] = useState<string>("");
   
   // Doctor-specific filters
   const [doctorPrescriptionIdFilter, setDoctorPrescriptionIdFilter] = useState<string>("all");
@@ -987,8 +1011,7 @@ export default function PrescriptionsPage() {
   const providerNames: Record<number, string> = {};
   // Use allUsers instead of providers to include all roles
   allUsers.forEach((provider) => {
-    providerNames[provider.id] =
-      `Dr. ${provider.firstName} ${provider.lastName}`;
+    providerNames[provider.id] = getDoctorLabel(provider);
   });
 
   const prescriptions = Array.isArray(rawPrescriptions)
@@ -2701,13 +2724,93 @@ export default function PrescriptionsPage() {
   };
 
   // Compute unique prescription IDs for the filter dropdown
+  const applySearchFilter = (value: string) => {
+    const trimmed = value.trim();
+    setSearchQuery(trimmed);
+    setPatientNameFilter("all");
+    if (trimmed) {
+      setStatusFilter("all");
+      setPrescriptionIdFilter("all");
+    }
+  };
+
+  const handleSearch = () => {
+    applySearchFilter(searchInput);
+    setPrescriptionSearchPreviewId("");
+  };
+
+  const handleRefreshFilters = () => {
+    setSearchInput("");
+    setSearchQuery("");
+    setStatusFilter("all");
+    setPrescriptionIdFilter("all");
+    setPatientNameFilter("");
+    setPrescriptionSearchPreviewId("");
+  };
+
+  const handlePatientFilter = (value: string) => {
+    setPatientNameFilter(value);
+    const trimmed = value.trim();
+    if (trimmed) {
+      setSearchInput("");
+      setSearchQuery("");
+      setStatusFilter("all");
+      setPrescriptionIdFilter("all");
+    }
+  };
+
+  const handleDoctorFilter = (value: string) => {
+    setDoctorFilter(value);
+    const trimmed = value.trim();
+    if (trimmed) {
+      setSearchInput("");
+      setSearchQuery("");
+      setStatusFilter("all");
+      setPrescriptionIdFilter("all");
+      setPatientNameFilter("");
+    }
+  };
+
   const uniquePrescriptionIds = useMemo(() => {
     if (!Array.isArray(prescriptions)) return [];
     const ids = prescriptions
-      .map((p: any) => p.prescriptionNumber)
-      .filter((id: string | undefined) => id !== undefined && id !== null && id !== "");
+      .map((p: any) => {
+        const id = p.prescriptionNumber;
+        return id === undefined || id === null ? "" : String(id);
+      })
+      .filter((id: string) => id !== "");
     return Array.from(new Set(ids)).sort();
   }, [prescriptions]);
+
+  const doctorOptions = useMemo(() => {
+    if (!Array.isArray(allUsers)) return [];
+    const options = allUsers
+      .filter((userItem: any) => {
+        const role = userItem.role?.toString().toLowerCase() || "";
+        return isDoctorLike(role) || role === "doctor";
+      })
+      .map((userItem: any) => ({
+        id: userItem.id,
+        name: getDoctorLabel(userItem),
+      }))
+      .filter((entry: any) => entry.name);
+    const unique = Array.from(
+      new Map(options.map((entry: any) => [entry.name, entry])).values(),
+    );
+    return unique.sort((a, b) =>
+      a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+    );
+  }, [allUsers]);
+
+  const patientOptions = useMemo(() => {
+    if (!Array.isArray(patients)) return [];
+    const names = patients
+      .map((p: any) => `${p.firstName || ""} ${p.lastName || ""}`.trim())
+      .filter((name) => name);
+    return Array.from(new Set(names)).sort((a, b) =>
+      a.localeCompare(b, undefined, { sensitivity: "base" }),
+    );
+  }, [patients]);
   
   // Compute unique prescription IDs for doctors (filtered to this doctor's prescriptions only)
   const doctorPrescriptionIds = useMemo(() => {
@@ -2745,48 +2848,120 @@ export default function PrescriptionsPage() {
       })
     : [];
 
-  // For display area - apply search, status, and prescription ID filters
   const filteredPrescriptions = Array.isArray(prescriptions)
     ? prescriptions.filter((prescription: any) => {
-        // For doctors: Separate filtering logic
+        // Doctor-specific filtering retains original flow
         if (user?.role === 'doctor') {
-          // Filter by patient name/ID search
           const matchesPatientSearch =
             !doctorPatientSearch ||
             prescription.patientName?.toLowerCase().includes(doctorPatientSearch.toLowerCase()) ||
             String(prescription.patientId || '').toLowerCase().includes(doctorPatientSearch.toLowerCase());
-          
-          // Filter by prescription ID dropdown
+
           const matchesPrescriptionId =
-            doctorPrescriptionIdFilter === "all" || 
-            prescription.prescriptionNumber === doctorPrescriptionIdFilter;
-          
-          // Filter by status
+            doctorPrescriptionIdFilter === "all" ||
+            String(prescription.prescriptionNumber) === doctorPrescriptionIdFilter;
+
           const matchesStatus =
             statusFilter === "all" || prescription.status === statusFilter;
-          
+
           return matchesPatientSearch && matchesPrescriptionId && matchesStatus;
         }
-        
-        // For other roles: search by patient name and medication name
+
+        const searchLower = searchQuery.toLowerCase();
         const matchesSearch =
           !searchQuery ||
-          prescription.patientName
+          prescription.patientName?.toLowerCase().includes(searchLower) ||
+          prescription.providerName?.toLowerCase().includes(searchLower) ||
+          (providerNames[prescription.providerId] || "")
             .toLowerCase()
-            .includes(searchQuery.toLowerCase()) ||
+            .includes(searchLower) ||
           prescription.medications.some((med: any) =>
-            med.name.toLowerCase().includes(searchQuery.toLowerCase()),
+            med.name.toLowerCase().includes(searchLower),
           );
 
         const matchesStatus =
-          statusFilter === "all" || prescription.status === statusFilter;
+          statusFilter === "all" ||
+          (prescription.status || "")
+            .toLowerCase()
+            .includes(statusFilter.toLowerCase());
 
+        const normalizedPrescriptionNumber = String(
+          prescription.prescriptionNumber || "",
+        ).toLowerCase();
+        const normalizedFilterValue = prescriptionIdFilter.toLowerCase();
         const matchesPrescriptionId =
-          prescriptionIdFilter === "all" || prescription.prescriptionNumber === prescriptionIdFilter;
+          prescriptionIdFilter === "all" ||
+          (normalizedFilterValue &&
+            normalizedPrescriptionNumber === normalizedFilterValue);
 
-        return matchesSearch && matchesStatus && matchesPrescriptionId;
+        const patientFilterValue = patientNameFilter.trim().toLowerCase();
+        const matchesPatientNameFilter =
+          !patientFilterValue ||
+          (prescription.patientName || "")
+            .toLowerCase()
+            .includes(patientFilterValue);
+
+        const doctorFilterValue = doctorFilter.trim();
+        const matchesDoctorFilter =
+          !doctorFilterValue ||
+          prescription.providerId === parseInt(doctorFilterValue) ||
+          prescription.doctorId === parseInt(doctorFilterValue);
+
+        return (
+          matchesSearch &&
+          matchesStatus &&
+          matchesPrescriptionId &&
+          matchesPatientNameFilter &&
+          matchesDoctorFilter
+        );
       })
     : [];
+
+  const isPrescriptionSearchActive = Boolean(
+    prescriptionSearchPreviewId && prescriptionIdFilter !== "all",
+  );
+
+  const prescriptionSearchResult = useMemo(() => {
+    if (!isPrescriptionSearchActive) return null;
+    return filteredPrescriptions[0] || null;
+  }, [filteredPrescriptions, isPrescriptionSearchActive]);
+
+  useEffect(() => {
+    if (isPrescriptionSearchActive) {
+      return;
+    }
+    if (prescriptionSearchPreviewId) {
+      setPrescriptionSearchPreviewId("");
+    }
+  }, [
+    filteredPrescriptions,
+    patientNameFilter,
+    doctorFilter,
+    statusFilter,
+    searchQuery,
+    searchInput,
+    isPrescriptionSearchActive,
+    prescriptionSearchPreviewId,
+  ]);
+
+  const isFilterActive = useMemo(
+    () =>
+      !!(
+        searchQuery.trim() ||
+        patientNameFilter.trim() ||
+        doctorFilter.trim() ||
+        statusFilter !== "all" ||
+        prescriptionIdFilter !== "all"
+      ),
+    [searchQuery, patientNameFilter, doctorFilter, statusFilter, prescriptionIdFilter],
+  );
+
+  const displayPrescriptions = useMemo(() => {
+    if (isFilterActive) {
+      return filteredPrescriptions;
+    }
+    return Array.isArray(prescriptions) ? prescriptions : [];
+  }, [isFilterActive, filteredPrescriptions, prescriptions]);
 
   if (isLoading) {
     return (
@@ -2822,8 +2997,90 @@ export default function PrescriptionsPage() {
       />
 
       <div className="flex-1 overflow-auto p-4 sm:p-6">
-        <div className="space-y-4 sm:space-y-6">
-          {/* Quick Stats */}
+        <Tabs defaultValue="prescriptions" className="space-y-6">
+          <TabsList className="grid grid-cols-2 gap-2 rounded-2xl border bg-white/80 p-1 text-sm font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-200">
+            <TabsTrigger
+              value="prescriptions"
+              className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-slate-100 dark:data-[state=active]:bg-white/10"
+            >
+              Prescriptions
+            </TabsTrigger>
+            <TabsTrigger
+              value="view-prescriptions"
+              className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-slate-100 dark:data-[state=active]:bg-white/10"
+            >
+              View Prescriptions
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="prescriptions" className="space-y-4 sm:space-y-6">
+            {isPrescriptionSearchActive && prescriptionSearchResult && (
+              <Card className="border border-gray-200 bg-slate-50 dark:bg-slate-900">
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-100">
+                        Search Result
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {prescriptionSearchResult.prescriptionNumber ||
+                          "Prescription"}
+                      </p>
+                    </div>
+                    <Badge className={getStatusColor(prescriptionSearchResult.status)}>
+                      {prescriptionSearchResult.status}
+                    </Badge>
+                  </div>
+                  <div className="grid gap-2 text-sm text-gray-600 dark:text-gray-300 lg:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">
+                        Patient
+                      </p>
+                      <p className="text-sm font-medium">
+                        {prescriptionSearchResult.patientName || "Unknown Patient"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">
+                        Provider
+                      </p>
+                      <p className="text-sm">
+                        {prescriptionSearchResult.providerName || "Provider unknown"}
+                      </p>
+                    </div>
+                  </div>
+                  <div className="flex gap-3 text-xs text-gray-500 dark:text-gray-400">
+                    <p>
+                      {prescriptionSearchResult.prescribedAt
+                        ? format(
+                            new Date(prescriptionSearchResult.prescribedAt),
+                            "dd LLL yyyy HH:mm",
+                          )
+                        : "Date unavailable"}
+                    </p>
+                    <p>•</p>
+                    <p>
+                      {prescriptionSearchResult.medications?.length
+                        ? `${prescriptionSearchResult.medications.length} medications`
+                        : "No medications listed"}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+            {isFilterActive && filteredPrescriptions.length === 0 && (
+              <Card className="border border-dashed border-gray-300 bg-yellow-50 text-left">
+                <CardContent className="p-4">
+                  <p className="text-sm font-semibold text-gray-700">
+                    No prescriptions found
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Try adjusting your search terms or filters to narrow the results.
+                  </p>
+                </CardContent>
+              </Card>
+            )}
+            {/* Quick Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Card>
               <CardContent className="p-3 sm:p-4">
@@ -4079,7 +4336,7 @@ export default function PrescriptionsPage() {
           </Card>
 
           {/* Prescriptions List */}
-          <div className="space-y-4">
+          <div className="space-y-4 bg-gray-50 dark:bg-gray-900 rounded-xl p-4">
             {filteredPrescriptions.length === 0 ? (
               <Card>
                 <CardContent className="p-12 text-center">
@@ -4651,10 +4908,470 @@ export default function PrescriptionsPage() {
               })
             )}
           </div>
-        </div>
-      </div>
+        </TabsContent>
 
-      {/* View Prescription Details Dialog */}
+        <TabsContent value="view-prescriptions" className="space-y-4 sm:space-y-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end">
+            <div className="relative flex-1 flex items-center gap-2">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Search by patient, medication, or provider..."
+                value={searchInput}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setSearchInput(value);
+                  applySearchFilter(value);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSearch();
+                  }
+                }}
+                className="pl-10 pr-10"
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleSearch}
+                disabled={!searchInput.trim()}
+                className="whitespace-nowrap"
+              >
+                Search
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={handleRefreshFilters}
+                title="Reset filters"
+                className="text-gray-400 hover:text-gray-700"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex flex-1 max-w-xs flex-col gap-1">
+              <Label className="text-xs uppercase tracking-wide text-gray-500">
+                Status
+              </Label>
+              <select
+                value={statusFilter}
+                onChange={(e) => {
+                  const value = e.target.value.trim();
+                  setStatusFilter(value);
+                  if (value !== "all") {
+                    setSearchQuery("");
+                    setSearchInput("");
+                    setPrescriptionIdFilter("all");
+                    setPatientNameFilter("");
+                  }
+                }}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="all">All statuses</option>
+                <option value="active">Active</option>
+                <option value="pending">Pending</option>
+                <option value="completed">Completed</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+            <div className="flex flex-1 max-w-xs flex-col gap-1 relative">
+              <Label className="text-xs uppercase tracking-wide text-gray-500">
+                Patient
+              </Label>
+              <Input
+                list="patient-name-options"
+                placeholder="Type or select patient"
+                value={patientNameFilter}
+                onChange={(e) => handlePatientFilter(e.target.value)}
+                className="pl-3 pr-10 text-sm bg-white text-black"
+              />
+              {patientNameFilter && (
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="absolute right-2 top-8 h-8 w-8 p-0"
+                  onClick={() => handlePatientFilter("")}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              )}
+              <datalist id="patient-name-options">
+                {patientOptions.map((name) => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+            </div>
+            <div className="flex flex-1 max-w-xs flex-col gap-1">
+              <Label className="text-xs uppercase tracking-wide text-gray-500">
+                Prescription #
+              </Label>
+              <select
+                value={prescriptionIdFilter}
+                onChange={(e) => {
+                  const value = e.target.value.trim();
+                  setPrescriptionIdFilter(value);
+                  if (value !== "all") {
+                    setSearchQuery("");
+                    setStatusFilter("all");
+                    setSearchInput("");
+                    setPrescriptionSearchPreviewId(value.toLowerCase());
+                  } else {
+                    setPrescriptionSearchPreviewId("");
+                  }
+                }}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="all">All prescriptions</option>
+                {uniquePrescriptionIds.map((id) => (
+                  <option key={id} value={id}>
+                    {id}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-1 max-w-xs flex-col gap-1">
+              <Label className="text-xs uppercase tracking-wide text-gray-500">
+                Doctor
+              </Label>
+              <select
+                value={doctorFilter}
+                onChange={(e) => handleDoctorFilter(e.target.value)}
+                className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:outline-none"
+              >
+                <option value="">All doctors</option>
+                {doctorOptions.map((entry: any) => (
+                  <option key={entry.id} value={String(entry.id)}>
+                    {entry.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            {isFilterActive &&
+              filteredPrescriptions.length > 0 &&
+              !isPrescriptionSearchActive && (
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+                    Filtered Results
+                  </h3>
+                  <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                    Showing {filteredPrescriptions.length} result
+                    {filteredPrescriptions.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+                <div className="space-y-4">
+                  {filteredPrescriptions.map((prescription: any) => (
+                    <Card
+                      key={prescription.id || prescription.prescriptionNumber}
+                      className="border border-gray-200 dark:border-gray-700"
+                    >
+                      <CardContent className="space-y-3">
+                        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                          <div>
+                            <p className="text-sm font-semibold text-gray-700 dark:text-gray-100">
+                              {prescription.patientName || "Unknown Patient"}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              Prescription #:{" "}
+                              {prescription.prescriptionNumber || "Not assigned"}
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <Badge className={getStatusColor(prescription.status)}>
+                              {prescription.status}
+                            </Badge>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {prescription.prescribedAt
+                                ? format(
+                                    new Date(prescription.prescribedAt),
+                                    "dd LLL yyyy HH:mm",
+                                  )
+                                : "Date unavailable"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="grid gap-3 text-sm text-gray-600 dark:text-gray-300 lg:grid-cols-2">
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500">
+                              Provider
+                            </p>
+                            <p className="text-sm">
+                              {prescription.providerName || "Provider unknown"}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              Medications:{" "}
+                              {prescription.medications
+                                ?.map((med: any) => med.name)
+                                .slice(0, 3)
+                                .join(", ") || "No medication listed"}
+                              {prescription.medications?.length > 3
+                                ? ` +${prescription.medications.length - 3} more`
+                                : ""}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-gray-500">
+                              Diagnosis & Pharmacy
+                            </p>
+                            <p className="text-sm">
+                              {prescription.diagnosis || "Diagnosis not documented"}
+                            </p>
+                            <p className="text-xs text-gray-500">
+                              {prescription.pharmacy?.name || "Halo Health Pharmacy"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2 text-xs">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="px-3 py-1"
+                            onClick={() => handleViewPrescription(prescription)}
+                          >
+                            <Eye className="h-3 w-3 mr-1" />
+                            View
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="px-3 py-1"
+                            onClick={() => handlePrintPrescription(prescription.id)}
+                          >
+                            <Printer className="h-3 w-3 mr-1" />
+                            Print
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="px-3 py-1"
+                            onClick={() => handleSendToPharmacy(prescription.id)}
+                          >
+                            <Send className="h-3 w-3 mr-1" />
+                            Send
+                          </Button>
+                          {user?.role !== "patient" && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="px-3 py-1"
+                              onClick={() => {
+                                setSelectedPrescription(prescription);
+                                setShowESignDialog(true);
+                              }}
+                            >
+                              <PenTool className="h-3 w-3 mr-1" />
+                              E-Sign
+                            </Button>
+                          )}
+                          {user?.role !== "patient" &&
+                            prescription.status === "active" &&
+                            canEdit("prescriptions") && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="px-3 py-1"
+                                onClick={() => handleEditPrescription(prescription)}
+                              >
+                                <Edit className="h-3 w-3 mr-1" />
+                                Edit
+                              </Button>
+                            )}
+                          {user?.role !== "patient" &&
+                            canDelete("prescriptions") && (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="px-3 py-1 text-red-600 hover:bg-red-50"
+                                onClick={() =>
+                                  handleDeletePrescription(prescription.id)
+                                }
+                                disabled={deletePrescriptionMutation.isPending}
+                              >
+                                <Trash2 className="h-3 w-3 mr-1" />
+                                {deletePrescriptionMutation.isPending
+                                  ? "Deleting..."
+                                  : "Delete"}
+                              </Button>
+                            )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div className="flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
+             
+              </h3>
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                  Showing {displayPrescriptions.length} result
+                  {displayPrescriptions.length === 1 ? "" : "s"}
+                </span>
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  title="Reset filters"
+                  onClick={handleRefreshFilters}
+                  className="text-gray-500 hover:text-gray-700"
+                >
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="space-y-4">
+            {!isFilterActive && displayPrescriptions.map((prescription: any) => (
+              <Card
+                key={prescription.id || prescription.prescriptionNumber}
+                className="border border-gray-200 dark:border-gray-700"
+              >
+                <CardContent className="space-y-3">
+                  <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-700 dark:text-gray-100">
+                        {prescription.patientName || "Unknown Patient"}
+                      </p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        Prescription #:{" "}
+                        {prescription.prescriptionNumber || "Not assigned"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <Badge className={getStatusColor(prescription.status)}>
+                        {prescription.status}
+                      </Badge>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">
+                        {prescription.prescribedAt
+                          ? format(
+                              new Date(prescription.prescribedAt),
+                              "dd LLL yyyy HH:mm",
+                            )
+                          : "Date unavailable"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="grid gap-3 text-sm text-gray-600 dark:text-gray-300 lg:grid-cols-2">
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">
+                        Provider
+                      </p>
+                      <p className="text-sm">
+                        {prescription.providerName || "Provider unknown"}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        Medications:{" "}
+                        {prescription.medications
+                          ?.map((med: any) => med.name)
+                          .slice(0, 3)
+                          .join(", ") || "No medication listed"}
+                        {prescription.medications?.length > 3
+                          ? ` +${prescription.medications.length - 3} more`
+                          : ""}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-gray-500">
+                        Diagnosis & Pharmacy
+                      </p>
+                      <p className="text-sm">
+                        {prescription.diagnosis || "Diagnosis not documented"}
+                      </p>
+                      <p className="text-xs text-gray-500">
+                        {prescription.pharmacy?.name || "Halo Health Pharmacy"}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="px-3 py-1"
+                      onClick={() => handleViewPrescription(prescription)}
+                    >
+                      <Eye className="h-3 w-3 mr-1" />
+                      View
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="px-3 py-1"
+                      onClick={() => handlePrintPrescription(prescription.id)}
+                    >
+                      <Printer className="h-3 w-3 mr-1" />
+                      Print
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="px-3 py-1"
+                      onClick={() => handleSendToPharmacy(prescription.id)}
+                    >
+                      <Send className="h-3 w-3 mr-1" />
+                      Send
+                    </Button>
+                    {user?.role !== "patient" && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="px-3 py-1"
+                        onClick={() => {
+                          setSelectedPrescription(prescription);
+                          setShowESignDialog(true);
+                        }}
+                      >
+                        <PenTool className="h-3 w-3 mr-1" />
+                        E-Sign
+                      </Button>
+                    )}
+                    {user?.role !== "patient" &&
+                      prescription.status === "active" &&
+                      canEdit("prescriptions") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="px-3 py-1"
+                          onClick={() => handleEditPrescription(prescription)}
+                        >
+                          <Edit className="h-3 w-3 mr-1" />
+                          Edit
+                        </Button>
+                      )}
+                    {user?.role !== "patient" &&
+                      canDelete("prescriptions") && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="px-3 py-1 text-red-600 hover:bg-red-50"
+                          onClick={() =>
+                            handleDeletePrescription(prescription.id)
+                          }
+                          disabled={deletePrescriptionMutation.isPending}
+                        >
+                          <Trash2 className="h-3 w-3 mr-1" />
+                          {deletePrescriptionMutation.isPending
+                            ? "Deleting..."
+                            : "Delete"}
+                        </Button>
+                      )}
+                  </div>
+                </CardContent>
+              </Card>
+            ))}
+            </div>
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+
+    {/* View Prescription Details Dialog */}
       <Dialog open={showViewDetails} onOpenChange={setShowViewDetails}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>

@@ -6057,18 +6057,19 @@ const formIds = useMemo(
             defaultValue="dynamic"
             className="space-y-6"
           >
-          <TabsList className="grid grid-cols-5 gap-2 rounded-2xl border bg-white/80 p-1 text-xs font-semibold text-slate-600">
+          <div className="rounded-2xl border border-gray-200 bg-white/80 p-1 shadow-sm dark:border-gray-800 dark:bg-white/5">
+            <TabsList className="grid grid-cols-5 gap-2 text-xs font-semibold text-slate-600 dark:text-slate-100">
             {!userIsPatient && (
               <>
                 <TabsTrigger
                   value="dynamic"
-                  className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-gray-200 data-[state=active]:text-black text-black"
+                  className="rounded-xl px-3 py-2 text-[12px] transition-colors text-slate-800 dark:text-slate-200 data-[state=active]:bg-black/5 dark:data-[state=active]:bg-white/10 data-[state=active]:text-slate-900 dark:data-[state=active]:text-white"
                 >
                   Dynamic Form Builder
                 </TabsTrigger>
                 <TabsTrigger
                   value="saved"
-                  className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-gray-200 data-[state=active]:text-black text-black"
+                  className="rounded-xl px-3 py-2 text-[12px] transition-colors text-slate-800 dark:text-slate-200 data-[state=active]:bg-black/5 dark:data-[state=active]:bg-white/10 data-[state=active]:text-slate-900 dark:data-[state=active]:text-white"
                 >
                   Saved Forms
                 </TabsTrigger>
@@ -6076,23 +6077,27 @@ const formIds = useMemo(
             )}
             <TabsTrigger
               value="filled"
-              className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-gray-200 data-[state=active]:text-black text-black"
+              className="rounded-xl px-3 py-2 text-[12px] transition-colors text-slate-800 dark:text-slate-200 data-[state=active]:bg-black/5 dark:data-[state=active]:bg-white/10 data-[state=active]:text-slate-900 dark:data-[state=active]:text-white"
             >
               Filled Forms
             </TabsTrigger>
             {!userIsPatient && (
               <TabsTrigger
                 value="editor"
-                className="rounded-xl px-3 py-2 transition-colors data-[state=active]:bg-gray-200 data-[state=active]:text-black text-black"
+                className="rounded-xl px-3 py-2 text-[12px] transition-colors text-slate-800 dark:text-slate-200 data-[state=active]:bg-black/5 dark:data-[state=active]:bg-white/10 data-[state=active]:text-slate-900 dark:data-[state=active]:text-white"
               >
                 Document Editor
               </TabsTrigger>
             )}
           </TabsList>
+          </div>
 
           {!userIsPatient && (
             <>
-              <TabsContent value="dynamic" className="space-y-6">
+              <TabsContent
+                value="dynamic"
+                className="space-y-6 rounded-3xl border border-gray-200 bg-white p-6 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
+              >
               <div className="space-y-2">
                 <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">Dynamic Form Builder</p>
                 <p className="text-xs text-gray-500 dark:text-gray-500">
@@ -6104,7 +6109,10 @@ const formIds = useMemo(
                 onLoadComplete={() => setFormLoadPayload(undefined)}
               />
               </TabsContent>
-              <TabsContent value="saved" className="space-y-6">
+              <TabsContent
+                value="saved"
+                className="space-y-6 rounded-3xl border border-gray-200 bg-white p-6 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
+              >
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">Saved Forms</p>
@@ -6217,7 +6225,10 @@ const formIds = useMemo(
           )}
 
           {!userIsPatient && (
-            <TabsContent value="editor" className="space-y-6">
+            <TabsContent
+              value="editor"
+              className="space-y-6 rounded-3xl border border-gray-200 bg-white p-6 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
+            >
               {/* Top Header - Professional Medical Theme */}
               <div className="px-6 py-4 flex-shrink-0 bg-white dark:bg-[hsl(var(--cura-midnight))] border-b-2 border-gray-200 dark:border-[hsl(var(--cura-steel))]">
                 <div className="flex items-center justify-between gap-8">
@@ -6822,7 +6833,10 @@ const formIds = useMemo(
             </TabsContent>
           )}
 
-            <TabsContent value="filled">
+            <TabsContent
+              value="filled"
+              className="space-y-6 rounded-3xl border border-gray-200 bg-white p-6 shadow-lg shadow-black/10 dark:border-gray-800 dark:bg-[#05070f] dark:text-slate-100"
+            >
               <div className="flex items-center justify-between mb-4">
                 <div>
                   <p className="text-sm font-semibold text-gray-600 dark:text-gray-300">Filled Forms</p>

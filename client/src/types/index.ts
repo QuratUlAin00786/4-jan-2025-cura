@@ -75,12 +75,15 @@ export interface Patient {
 
 export interface User {
   id: number;
+  organizationId: number;
   email: string;
   username: string;
   firstName: string;
   lastName: string;
   role: string;
   department?: string;
+  medicalSpecialtyCategory?: string;
+  gender?: string;
   isActive: boolean;
   lastLoginAt?: string;
   createdAt: string;
@@ -162,11 +165,13 @@ export interface Organization {
 
 export interface AuthUser {
   id: number;
+  organizationId: number;
   email: string;
   firstName: string;
   lastName: string;
   role: string;
   department?: string;
+  gender?: string;
 }
 
 export interface TenantInfo {

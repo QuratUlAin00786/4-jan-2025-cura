@@ -88,6 +88,34 @@ export const db = drizzle({ client: pool, schema });
   }
 })();
 
+// Ensure treatments_info table has organization_id column
+(async () => {
+  try {
+    await pool.query(`
+      ALTER TABLE treatments_info
+      ADD COLUMN IF NOT EXISTS organization_id INTEGER REFERENCES organizations(id) DEFAULT 1,
+      ADD COLUMN IF NOT EXISTS created_by INTEGER REFERENCES users(id),
+      ADD COLUMN IF NOT EXISTS treatment_id INTEGER
+    `);
+    await pool.query(`
+      UPDATE treatments_info
+      SET organization_id = 1
+      WHERE organization_id IS NULL
+    `);
+    await pool.query(`
+      ALTER TABLE treatments_info
+      ALTER COLUMN organization_id SET NOT NULL
+    `);
+    await pool.query(`
+      ALTER TABLE treatments_info
+      ALTER COLUMN treatment_id DROP NOT NULL
+    `);
+    console.log('✅ Ensured treatments_info schema columns exist');
+  } catch (error: any) {
+    console.warn('⚠️ Unable to ensure treatments_info schema columns:', error?.message || error);
+  }
+})();
+
 // Ensure appointments has new type/ID columns
 (async () => {
   try {

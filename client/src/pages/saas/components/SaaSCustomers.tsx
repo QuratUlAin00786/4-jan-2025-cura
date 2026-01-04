@@ -37,6 +37,7 @@ import {
 } from 'lucide-react';
 
 export default function SaaSCustomers() {
+  const [searchInput, setSearchInput] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('all');
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -86,6 +87,12 @@ export default function SaaSCustomers() {
       return response.json();
     },
   });
+
+  const handleSearch = () => {
+    const trimmed = searchInput.trim();
+    setSearchTerm(trimmed);
+    setSearchInput(trimmed);
+  };
 
   // Auto-generate subdomain from organization name
   useEffect(() => {
@@ -631,25 +638,44 @@ export default function SaaSCustomers() {
         
         <CardContent className="space-y-6">
           {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-4">
-            <div className="relative flex-1">
+          <div className="flex flex-col sm:flex-row gap-4 items-end">
+            <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
-                placeholder="Search customers by name, domain, or email..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 pr-8"
+                placeholder="Type name, domain, or email and hit Enter"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleSearch();
+                  }
+                }}
+                className="pl-10 pr-10"
               />
-              {searchTerm && (
+              {(searchTerm || searchInput) && (
                 <button
-                  onClick={() => setSearchTerm('')}
-                  className="absolute right-2 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 hover:text-gray-600"
+                  onClick={() => {
+                    setSearchTerm('');
+                    setSearchInput('');
+                  }}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400 hover:text-gray-600"
                   style={{ backgroundColor: 'transparent', border: 'none', cursor: 'pointer' }}
                 >
                   ✕
                 </button>
               )}
             </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="flex items-center gap-2"
+              onClick={handleSearch}
+              disabled={!searchInput.trim()}
+            >
+              <Search className="h-4 w-4" />
+              Search
+            </Button>
             <select
               value={selectedStatus}
               onChange={(e) => setSelectedStatus(e.target.value)}
@@ -737,8 +763,8 @@ export default function SaaSCustomers() {
 
                         {/* Edit Customer Button */}
                         <Dialog open={editingCustomer?.id === customer.id} onOpenChange={(open) => !open && setEditingCustomer(null)}>
-                          <DialogTrigger asChild>
-                            <Button size="sm" variant="outline" onClick={async () => {
+                            <DialogTrigger asChild>
+                              <Button size="sm" variant="outline" onClick={async () => {
                               try {
                                 const response = await saasApiRequest('GET', `/api/saas/customers/${customer.id}`);
                                 const customerDetails = await response.json();
@@ -775,12 +801,12 @@ export default function SaaSCustomers() {
                                 });
                               }
                             }}>
-                              <Settings className="h-4 w-4" />
+                              <Edit className="h-4 w-4" />
                             </Button>
                           </DialogTrigger>
                           <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto z-[9999]">
                             <DialogHeader>
-                              <DialogTitle>Edit Customer - {customer.name}</DialogTitle>
+                              <DialogTitle>Edit Organization - {customer.name}</DialogTitle>
                             </DialogHeader>
                             {editingCustomer && (
                               <div className="space-y-6">
@@ -1041,7 +1067,7 @@ export default function SaaSCustomers() {
                                     disabled={updateCustomerMutation.isPending}
                                     className="flex-1"
                                   >
-                                    {updateCustomerMutation.isPending ? 'Updating...' : 'Update Customer'}
+                                    {updateCustomerMutation.isPending ? 'Updating...' : 'Update Organization'}
                                   </Button>
                                 </div>
                               </div>

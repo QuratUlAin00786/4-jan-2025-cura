@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { format } from "date-fns";
 import { useToast } from "@/hooks/use-toast";
@@ -72,6 +72,7 @@ interface Invoice {
     quantity: number;
     unitPrice: number;
     total: number;
+    amount?: number;
   }>;
   insurance?: {
     provider: string;
@@ -185,6 +186,8 @@ function PricingManagementDashboard() {
   const [showLabRoleSuggestions, setShowLabRoleSuggestions] = useState(false);
   const [showLabDoctorSuggestions, setShowLabDoctorSuggestions] = useState(false);
   const [showImagingTypeSuggestions, setShowImagingTypeSuggestions] = useState(false);
+  const [showTreatmentRoleSuggestions, setShowTreatmentRoleSuggestions] = useState(false);
+  const [showTreatmentDoctorSuggestions, setShowTreatmentDoctorSuggestions] = useState(false);
   const [skipRoleSuggestionFocus, setSkipRoleSuggestionFocus] = useState(false);
   const [labTestFilter, setLabTestFilter] = useState("");
   const [labDoctorFilter, setLabDoctorFilter] = useState("");
@@ -201,15 +204,172 @@ function PricingManagementDashboard() {
   const [doctorNameError, setDoctorNameError] = useState("");
   const [labTestError, setLabTestError] = useState("");
   const [imagingError, setImagingError] = useState("");
+  const [showTreatmentsInfoModal, setShowTreatmentsInfoModal] = useState(false);
+  const [editingTreatmentInfo, setEditingTreatmentInfo] = useState<any>(null);
+  const [newTreatmentInfo, setNewTreatmentInfo] = useState({ name: "", colorCode: "#2563eb" });
+  const [isSavingTreatmentInfo, setIsSavingTreatmentInfo] = useState(false);
   const [showAddTreatmentDialog, setShowAddTreatmentDialog] = useState(false);
   const [treatmentForm, setTreatmentForm] = useState({
     name: "",
     basePrice: "",
     colorCode: "#000000",
+    doctorRole: "",
+    doctorName: "",
+    doctorId: null as number | null,
+    treatmentInfoId: ""
   });
   const [treatmentError, setTreatmentError] = useState("");
   const [isSavingTreatment, setIsSavingTreatment] = useState(false);
   const [editingTreatment, setEditingTreatment] = useState<any>(null);
+
+  const closeTreatmentsInfoModal = () => {
+    setShowTreatmentsInfoModal(false);
+    setEditingTreatmentInfo(null);
+    setNewTreatmentInfo({ name: "", colorCode: "#2563eb" });
+  };
+
+  const openTreatmentsInfoModalForCreate = () => {
+    setEditingTreatmentInfo(null);
+    setNewTreatmentInfo({ name: "", colorCode: "#2563eb" });
+    setShowTreatmentsInfoModal(true);
+  };
+
+  const openTreatmentsInfoModalForEdit = (info: any) => {
+    setEditingTreatmentInfo(info);
+    setNewTreatmentInfo({
+      name: info.name || "",
+      colorCode: info.colorCode || "#2563eb"
+    });
+    setShowTreatmentsInfoModal(true);
+  };
+
+  const invalidateTreatmentsInfoCache = () => {
+    queryClient.invalidateQueries({ queryKey: ["/api/treatments-info"] });
+    queryClient.invalidateQueries({ queryKey: ["/api/pricing/treatments"] });
+  };
+
+  const createTreatmentsInfoMutation = useMutation({
+    mutationFn: async (payload: { name: string; colorCode: string }) => {
+      const response = await apiRequest("POST", "/api/treatments-info", payload);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to create treatment entry");
+      }
+      return response.json();
+    },
+    onMutate: () => {
+      setIsSavingTreatmentInfo(true);
+    },
+    onSettled: () => {
+      setIsSavingTreatmentInfo(false);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Treatment created",
+        description: "New treatment metadata has been saved."
+      });
+      closeTreatmentsInfoModal();
+      invalidateTreatmentsInfoCache();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to create treatment",
+        description: error.message || "Unable to save the treatment metadata",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const updateTreatmentsInfoMutation = useMutation({
+    mutationFn: async (payload: { id: number; name: string; colorCode: string }) => {
+      const response = await apiRequest("PATCH", `/api/treatments-info/${payload.id}`, payload);
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to update treatment entry");
+      }
+      return response.json();
+    },
+    onMutate: () => {
+      setIsSavingTreatmentInfo(true);
+    },
+    onSettled: () => {
+      setIsSavingTreatmentInfo(false);
+    },
+    onSuccess: () => {
+      toast({
+        title: "Treatment updated",
+        description: "Treatment metadata has been updated."
+      });
+      closeTreatmentsInfoModal();
+      invalidateTreatmentsInfoCache();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Failed to update treatment",
+        description: error.message || "Unable to update the treatment metadata",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const deleteTreatmentsInfoMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const response = await apiRequest("DELETE", `/api/treatments-info/${id}`, {});
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || "Failed to delete treatment metadata");
+      }
+      return response.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Treatment removed",
+        description: "Treatment metadata has been deleted."
+      });
+      invalidateTreatmentsInfoCache();
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Delete failed",
+        description: error.message || "Unable to delete treatment metadata",
+        variant: "destructive"
+      });
+    }
+  });
+
+  const handleSaveTreatmentsInfo = async () => {
+    if (!newTreatmentInfo.name.trim()) {
+      toast({
+        title: "Missing name",
+        description: "Please provide a treatment name before saving.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    const payload = {
+      name: newTreatmentInfo.name.trim(),
+      colorCode: newTreatmentInfo.colorCode
+    };
+
+    if (editingTreatmentInfo && editingTreatmentInfo.id) {
+      await updateTreatmentsInfoMutation.mutateAsync({
+        id: editingTreatmentInfo.id,
+        ...payload
+      });
+    } else {
+      await createTreatmentsInfoMutation.mutateAsync(payload);
+    }
+  };
+
+  const handleDeleteTreatmentsInfo = async (info: any) => {
+    if (!info?.id) return;
+    const confirmed = window.confirm(
+      `Delete "${info.name}" from Treatments metadata? This cannot be undone.`
+    );
+    if (!confirmed) return;
+    await deleteTreatmentsInfoMutation.mutateAsync(info.id);
+  };
 
   const { data: users = [] } = useQuery({
     queryKey: ["/api/users"],
@@ -250,10 +410,17 @@ function PricingManagementDashboard() {
       if (!target.closest('#imagingType') && !target.closest('.imaging-type-suggestions')) {
         setShowImagingTypeSuggestions(false);
       }
+      if (!target.closest('#treatmentRole') && !target.closest('.treatment-role-suggestions')) {
+        setShowTreatmentRoleSuggestions(false);
+      }
+      if (!target.closest('#treatmentDoctorName') && !target.closest('.treatment-doctor-suggestions')) {
+        setShowTreatmentDoctorSuggestions(false);
+      }
     };
     
     if (showServiceSuggestions || showRoleSuggestions || showDoctorSuggestions || 
-        showLabTestSuggestions || showLabRoleSuggestions || showLabDoctorSuggestions || showImagingTypeSuggestions) {
+        showLabTestSuggestions || showLabRoleSuggestions || showLabDoctorSuggestions || 
+        showImagingTypeSuggestions || showTreatmentRoleSuggestions || showTreatmentDoctorSuggestions) {
       document.addEventListener('mousedown', handleClickOutside);
       return () => document.removeEventListener('mousedown', handleClickOutside);
     }
@@ -269,24 +436,32 @@ function PricingManagementDashboard() {
     return pathMap[tab] || tab;
   };
 
-  const { data: doctorsFees = [], isLoading: loadingDoctors } = useQuery({
+  const { data: doctorsFeesData = [], isLoading: loadingDoctors } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/doctors-fees"],
     enabled: pricingTab === "doctors"
   });
+  const doctorsFees: any[] = doctorsFeesData ?? [];
 
-  const { data: labTests = [], isLoading: loadingLabs } = useQuery({
+  const { data: labTestsData = [], isLoading: loadingLabs } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/lab-tests"],
     enabled: pricingTab === "lab-tests"
   });
+  const labTests: any[] = labTestsData ?? [];
 
-  const { data: imaging = [], isLoading: loadingImaging } = useQuery({
+  const { data: imagingData = [], isLoading: loadingImaging } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/imaging"],
     enabled: pricingTab === "imaging"
   });
+  const imaging: any[] = imagingData ?? [];
 
-  const { data: treatments = [], isLoading: loadingTreatments } = useQuery({
+  const { data: treatmentsData = [], isLoading: loadingTreatments } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/treatments"],
     enabled: pricingTab === "treatments"
+  });
+  const treatments: any[] = treatmentsData ?? [];
+  const { data: treatmentsInfoList = [], isLoading: loadingTreatmentsInfo } = useQuery<any[], Error>({
+    queryKey: ["/api/treatments-info"],
+    enabled: true
   });
 
   const generateImagingCode = (imagingType: string) => {
@@ -342,6 +517,10 @@ function PricingManagementDashboard() {
       name: "",
       basePrice: "",
       colorCode: "#000000",
+      doctorRole: "",
+      doctorName: "",
+      doctorId: null,
+      treatmentInfoId: ""
     });
     setTreatmentError("");
     setEditingTreatment(null);
@@ -353,6 +532,10 @@ function PricingManagementDashboard() {
       name: treatment.name || "",
       basePrice: treatment.basePrice?.toString?.() ?? "",
       colorCode: treatment.colorCode || "#000000",
+      doctorRole: treatment.doctorRole || "",
+      doctorName: treatment.doctorName || "",
+      doctorId: treatment.doctorId || null,
+      treatmentInfoId: ""
     });
     setTreatmentError("");
     setEditingTreatment(treatment);
@@ -377,21 +560,26 @@ function PricingManagementDashboard() {
 
     setIsSavingTreatment(true);
     try {
+      // Use the string value for basePrice to satisfy Zod decimal schema if needed
+      // and ensure doctorId is only sent if it has a value
+      const payload: any = {
+        name: treatmentForm.name.trim(),
+        basePrice: treatmentForm.basePrice, // Sending as string
+        colorCode: treatmentForm.colorCode,
+        doctorRole: treatmentForm.doctorRole || null,
+        doctorName: treatmentForm.doctorName || null,
+        currency: "GBP",
+      };
+
+      if (treatmentForm.doctorId) {
+        payload.doctorId = treatmentForm.doctorId;
+      }
+
       if (editingTreatment) {
-        await apiRequest("PATCH", `/api/pricing/treatments/${editingTreatment.id}`, {
-          name: treatmentForm.name.trim(),
-          basePrice: parsedPrice,
-          colorCode: treatmentForm.colorCode,
-          currency: "GBP",
-        });
+        await apiRequest("PATCH", `/api/pricing/treatments/${editingTreatment.id}`, payload);
         toast({ title: "Success", description: "Treatment updated" });
       } else {
-        await apiRequest("POST", "/api/pricing/treatments", {
-          name: treatmentForm.name.trim(),
-          basePrice: parsedPrice,
-          colorCode: treatmentForm.colorCode,
-          currency: "GBP",
-        });
+        await apiRequest("POST", "/api/pricing/treatments", payload);
         toast({ title: "Success", description: "Treatment added" });
       }
 
@@ -402,9 +590,27 @@ function PricingManagementDashboard() {
         name: "",
         basePrice: "",
         colorCode: "#000000",
+        doctorRole: "",
+        doctorName: "",
+        doctorId: null,
+        treatmentInfoId: ""
       });
     } catch (error: any) {
-      setTreatmentError(error.message || "Failed to save treatment");
+      console.error("Save treatment error:", error);
+      let msg = "Failed to save treatment";
+      if (error.details) {
+        // Zod error details format
+        const details = typeof error.details === 'object' ? JSON.stringify(error.details) : error.details;
+        msg = `Validation Error: ${details}`;
+      } else if (error.message) {
+        msg = error.message;
+      }
+      setTreatmentError(msg);
+      toast({
+        title: "Error",
+        description: msg,
+        variant: "destructive",
+      });
     } finally {
       setIsSavingTreatment(false);
     }
@@ -942,12 +1148,13 @@ function PricingManagementDashboard() {
   };
 
   return (
-    <Tabs value={pricingTab} onValueChange={setPricingTab} className="w-full">
-      <TabsList className="grid w-full grid-cols-4">
+  <Tabs value={pricingTab} onValueChange={setPricingTab} className="w-full">
+    <TabsList className="grid w-full grid-cols-5">
         <TabsTrigger value="doctors" data-testid="tab-doctors-pricing">Doctors Fees</TabsTrigger>
         <TabsTrigger value="lab-tests" data-testid="tab-lab-tests-pricing">Lab Tests</TabsTrigger>
         <TabsTrigger value="imaging" data-testid="tab-imaging-pricing">Imaging</TabsTrigger>
         <TabsTrigger value="treatments" data-testid="tab-treatments-pricing">Treatments</TabsTrigger>
+      <TabsTrigger value="all-treatments" data-testid="tab-all-treatments">All Treatments</TabsTrigger>
       </TabsList>
 
       <TabsContent value="doctors" className="space-y-4 mt-4">
@@ -1282,7 +1489,7 @@ function PricingManagementDashboard() {
           {canCreate('billing') && (
             <Button size="sm" onClick={openAddTreatmentDialog} data-testid="button-add-treatments">
               <Plus className="h-4 w-4 mr-2" />
-              Add Treatements
+              Add Treatment
             </Button>
           )}
         </div>
@@ -1299,6 +1506,8 @@ function PricingManagementDashboard() {
               <thead>
                   <tr className="border-b bg-gray-50 dark:bg-gray-800">
                   <th className="text-left p-3">Name</th>
+                  <th className="text-left p-3">Role</th>
+                  <th className="text-left p-3">Assigned To</th>
                   <th className="text-left p-3">Price</th>
                   <th className="text-left p-3">Color</th>
                   <th className="text-left p-3">Status</th>
@@ -1310,6 +1519,8 @@ function PricingManagementDashboard() {
                 {treatments.map((treatment: any) => (
                   <tr key={treatment.id} className="border-b hover:bg-gray-50 dark:hover:bg-gray-800">
                     <td className="p-3 font-medium">{treatment.name}</td>
+                    <td className="p-3 text-gray-600 dark:text-gray-400 capitalize">{treatment.doctorRole || "—"}</td>
+                    <td className="p-3 font-medium text-blue-600 dark:text-blue-400">{treatment.doctorName || "—"}</td>
                     <td className="p-3 font-semibold">
                       {(() => {
                         const priceNumber = Number(treatment.basePrice);
@@ -1364,6 +1575,79 @@ function PricingManagementDashboard() {
             </table>
           </div>
         )}
+      </TabsContent>
+
+      <TabsContent value="all-treatments" className="space-y-4 mt-4">
+        <div className="flex justify-between items-center mb-3">
+          <div>
+            <h3 className="text-lg font-semibold">All Treatments Metadata</h3>
+            <span className="text-sm text-gray-500">
+              {treatmentsInfoList.length} entries
+            </span>
+          </div>
+          {canCreate('billing') && (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={openTreatmentsInfoModalForCreate}
+              data-testid="button-create-treatments-info-alt"
+              disabled={isSavingTreatmentInfo}
+            >
+              Create Treatments
+            </Button>
+          )}
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b bg-gray-50 dark:bg-gray-800">
+                <th className="text-left p-3">ID</th>
+                <th className="text-left p-3">Name</th>
+                <th className="text-left p-3">Color</th>
+                <th className="text-left p-3">Created At</th>
+              <th className="text-left p-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {treatmentsInfoList.map((info: any) => (
+                <tr key={info.id} className="border-b hover:bg-gray-50 dark:hover:bg-gray-800">
+                  <td className="p-3">{info.id}</td>
+                  <td className="p-3 font-medium">{info.name}</td>
+                  <td className="p-3">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className="w-4 h-4 rounded-full border"
+                        style={{ backgroundColor: info.colorCode || "#000" }}
+                      />
+                      <span>{info.colorCode?.toUpperCase() || "—"}</span>
+                    </div>
+                  </td>
+                  <td className="p-3">{new Date(info.createdAt).toLocaleString()}</td>
+                <td className="p-3">
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => openTreatmentsInfoModalForEdit(info)}
+                      data-testid={`button-edit-treatment-info-${info.id}`}
+                    >
+                      <Edit className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleDeleteTreatmentsInfo(info)}
+                      data-testid={`button-delete-treatment-info-${info.id}`}
+                    >
+                      <Trash2 className="h-4 w-4 text-rose-600" />
+                    </Button>
+                  </div>
+                </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </TabsContent>
 
 
@@ -2320,6 +2604,53 @@ function PricingManagementDashboard() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={showTreatmentsInfoModal} onOpenChange={(open) => {
+        if (!open) {
+          closeTreatmentsInfoModal();
+          return;
+        }
+        setShowTreatmentsInfoModal(true);
+      }}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>{editingTreatmentInfo ? "Edit Treatment Metadata" : "Create Treatment Metadata"}</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div>
+              <Label htmlFor="treatmentInfoName">Treatment Name</Label>
+              <Input
+                id="treatmentInfoName"
+                value={newTreatmentInfo.name}
+                onChange={(e) => setNewTreatmentInfo({ ...newTreatmentInfo, name: e.target.value })}
+                placeholder="e.g., Botox"
+              />
+            </div>
+            <div>
+              <Label htmlFor="treatmentInfoColor">Color</Label>
+              <Input
+                id="treatmentInfoColor"
+                type="color"
+                value={newTreatmentInfo.colorCode}
+                onChange={(e) => setNewTreatmentInfo({ ...newTreatmentInfo, colorCode: e.target.value })}
+                className="h-10 w-16 p-0"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={closeTreatmentsInfoModal}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveTreatmentsInfo} disabled={isSavingTreatmentInfo}>
+              {isSavingTreatmentInfo
+                ? "Saving..."
+                : editingTreatmentInfo
+                  ? "Update Treatment"
+                  : "Save Treatment"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Lab Tests Already Exists Modal */}
       <Dialog open={showTestsExistsModal} onOpenChange={setShowTestsExistsModal}>
         <DialogContent>
@@ -2370,14 +2701,132 @@ function PricingManagementDashboard() {
           </DialogHeader>
 
           <div className="space-y-4 pt-2">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1 relative">
+                <Label htmlFor="treatmentRole">Role <span className="text-red-500">*</span></Label>
+                <Input
+                  id="treatmentRole"
+                  value={treatmentForm.doctorRole}
+                  onChange={(e) => {
+                    setTreatmentForm({ ...treatmentForm, doctorRole: e.target.value, doctorName: "", doctorId: null });
+                    setShowTreatmentRoleSuggestions(true);
+                  }}
+                  onFocus={() => setShowTreatmentRoleSuggestions(true)}
+                  placeholder="Select role"
+                  autoComplete="off"
+                />
+                {showTreatmentRoleSuggestions && (
+                  <div className="treatment-role-suggestions absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg max-h-60 overflow-auto top-full">
+                    {roles
+                      .filter((role: any) => 
+                        role.name !== 'patient' && 
+                        role.name !== 'admin' &&
+                        (!treatmentForm.doctorRole || 
+                        role.displayName.toLowerCase().includes(treatmentForm.doctorRole.toLowerCase()) ||
+                        role.name.toLowerCase().includes(treatmentForm.doctorRole.toLowerCase()))
+                      )
+                      .map((role: any, index: number) => (
+                        <div
+                          key={index}
+                          className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+                          onClick={() => {
+                            setTreatmentForm({ ...treatmentForm, doctorRole: role.name, doctorName: "", doctorId: null });
+                            setShowTreatmentRoleSuggestions(false);
+                          }}
+                        >
+                          <div className="font-medium text-sm">{role.displayName}</div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-1 relative">
+                <Label htmlFor="treatmentDoctorName">Select Name <span className="text-red-500">*</span></Label>
+                <Input
+                  id="treatmentDoctorName"
+                  value={treatmentForm.doctorName}
+                  onChange={(e) => {
+                    setTreatmentForm({ ...treatmentForm, doctorName: e.target.value, doctorId: null });
+                    setShowTreatmentDoctorSuggestions(true);
+                  }}
+                  onFocus={() => setShowTreatmentDoctorSuggestions(true)}
+                  placeholder="Type to search..."
+                  autoComplete="off"
+                />
+                {showTreatmentDoctorSuggestions && (
+                  <div className="treatment-doctor-suggestions absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-md shadow-lg max-h-60 overflow-auto top-full">
+                    {users
+                      .filter((u: any) => {
+                        const matchesRole = !treatmentForm.doctorRole || u.role === treatmentForm.doctorRole;
+                        const matchesSearch = !treatmentForm.doctorName || 
+                          `${u.firstName} ${u.lastName}`.toLowerCase().includes(treatmentForm.doctorName.toLowerCase());
+                        return matchesRole && matchesSearch && u.role !== 'patient';
+                      })
+                      .map((u: any) => (
+                        <div
+                          key={u.id}
+                          className="px-4 py-2 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer"
+                          onClick={() => {
+                            setTreatmentForm({ 
+                              ...treatmentForm, 
+                              doctorName: `${u.firstName} ${u.lastName}`, 
+                              doctorId: u.id,
+                              doctorRole: u.role // Auto-update role if not set
+                            });
+                            setShowTreatmentDoctorSuggestions(false);
+                          }}
+                        >
+                          <div className="font-medium text-sm">{u.firstName} {u.lastName}</div>
+                          <div className="text-xs text-gray-500">{u.role}</div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div className="space-y-1">
               <Label htmlFor="treatment-name">Treatment Name</Label>
-              <Input
-                id="treatment-name"
-                value={treatmentForm.name}
-                onChange={(e) => setTreatmentForm({ ...treatmentForm, name: e.target.value })}
-                placeholder="e.g. IV drip"
-              />
+              <Select
+                value={treatmentForm.treatmentInfoId || ""}
+                onValueChange={(value) => {
+                  const selected = treatmentsInfoList.find((info: any) => info.id.toString() === value);
+                  setTreatmentForm({
+                    ...treatmentForm,
+                    treatmentInfoId: value,
+                    name: selected ? selected.name : "",
+                    colorCode: selected ? selected.colorCode : "#000000"
+                  });
+                }}
+                disabled={loadingTreatmentsInfo}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder={loadingTreatmentsInfo ? "Loading treatments..." : "Select treatment"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {treatmentsInfoList.length === 0 ? (
+                    <SelectItem value="" disabled>
+                      No treatments configured
+                    </SelectItem>
+                  ) : (
+                    treatmentsInfoList.map((info: any) => (
+                      <SelectItem key={`treatment-info-${info.id}`} value={info.id.toString()}>
+                        <div className="flex items-center justify-between">
+                          <span>{info.name}</span>
+                          <span className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                            <span
+                              className="w-3 h-3 rounded-full border"
+                              style={{ backgroundColor: info.colorCode || "#000" }}
+                            />
+                            {info.colorCode?.toUpperCase()}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-1">
               <Label htmlFor="treatment-price">Price (GBP)</Label>
@@ -2390,19 +2839,6 @@ function PricingManagementDashboard() {
                 onChange={(e) => setTreatmentForm({ ...treatmentForm, basePrice: e.target.value })}
                 placeholder="e.g. 5.00"
               />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="treatment-color">Color</Label>
-              <div className="flex items-center gap-3">
-                <Input
-                  id="treatment-color"
-                  type="color"
-                  className="w-16 h-10 p-0"
-                  value={treatmentForm.colorCode}
-                  onChange={(e) => setTreatmentForm({ ...treatmentForm, colorCode: e.target.value })}
-                />
-                <span className="text-sm text-gray-600 dark:text-gray-400">{treatmentForm.colorCode}</span>
-              </div>
             </div>
             {treatmentError && (
               <p className="text-sm text-red-500">{treatmentError}</p>
@@ -3721,10 +4157,12 @@ export default function BillingPage() {
   });
 
   // Fetch doctors fees for Revenue Breakdown
-  const { data: doctorsFees = [] } = useQuery({
+  const { data: doctorsFeesForReportsData = [] } = useQuery<any[], Error>({
     queryKey: ["/api/pricing/doctors-fees"],
     enabled: isAdmin && activeTab === "custom-reports"
   });
+  const doctorsFeesForReports: any[] = doctorsFeesForReportsData ?? [];
+  const doctorsFees: any[] = doctorsFeesForReports;
   
   // Fetch users and roles for Custom Reports filters
   const { data: users = [] } = useQuery({
@@ -3891,8 +4329,8 @@ export default function BillingPage() {
   };
 
   // Calculate Revenue Breakdown from real data
-  const getRevenueBreakdown = () => {
-    if (!Array.isArray(invoices) || !Array.isArray(doctorsFees)) {
+  const getRevenueBreakdown = (feeList: any[]) => {
+    if (!Array.isArray(invoices) || !Array.isArray(feeList)) {
       return [];
     }
 
@@ -3967,7 +4405,7 @@ export default function BillingPage() {
 
     filteredInvoices.forEach((invoice: any) => {
       // Try to match invoice service with doctors fee by service name or service type
-      const matchingFee = doctorsFees.find((fee: any) => 
+      const matchingFee = feeList.find((fee: any) => 
         fee.serviceName === invoice.serviceType || 
         fee.serviceName === invoice.serviceId
       );
@@ -4040,7 +4478,7 @@ export default function BillingPage() {
 
   // Export Revenue Breakdown as CSV
   const exportRevenueCSV = () => {
-    const data = getRevenueBreakdown();
+    const data = getRevenueBreakdown(doctorsFeesForReports);
     
     if (data.length === 0) {
       toast({
@@ -4185,7 +4623,7 @@ export default function BillingPage() {
     const invoicesByService: Record<string, any> = {};
     
     filteredInvoices.forEach((invoice: any) => {
-      const matchingFee = doctorsFees.find((fee: any) => 
+      const matchingFee = doctorsFeesForReports.find((fee: any) => 
         fee.serviceName === invoice.serviceType || fee.serviceName === invoice.serviceId
       );
       const serviceName = matchingFee?.serviceName || invoice.serviceType || 'Other Services';
@@ -4245,7 +4683,7 @@ export default function BillingPage() {
   // Export Revenue Breakdown as PDF with Professional Layout
   const exportRevenuePDF = () => {
     const reportData = buildReportDataset();
-    const data = getRevenueBreakdown();
+    const data = getRevenueBreakdown(doctorsFeesForReports);
     
     if (data.length === 0) {
       toast({
@@ -6889,8 +7327,8 @@ export default function BillingPage() {
                         <tr key={index} className="border-b border-gray-200 dark:border-gray-700 last:border-b-0">
                           <td className="p-3 font-mono text-gray-900 dark:text-gray-100">{item.code}</td>
                           <td className="p-3 text-gray-900 dark:text-gray-100">{item.description}</td>
-                          <td className="p-3 text-right text-gray-900 dark:text-gray-100">£{Number(item.unitPrice || item.total || item.amount || 0).toFixed(2)}</td>
-                          <td className="p-3 text-right font-semibold text-gray-900 dark:text-gray-100">£{Number(item.total || item.amount || 0).toFixed(2)}</td>
+                          <td className="p-3 text-right text-gray-900 dark:text-gray-100">£{Number(item.unitPrice || item.total || 0).toFixed(2)}</td>
+                          <td className="p-3 text-right font-semibold text-gray-900 dark:text-gray-100">£{Number(item.total || 0).toFixed(2)}</td>
                         </tr>
                       ))}
                     </tbody>

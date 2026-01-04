@@ -338,27 +338,30 @@ export function FormBuilder({ loadForm, onLoadComplete }: FormBuilderProps = {})
       </CardContent>
       </Card>
     </div>
-      <Card className="bg-gradient-to-b from-white/80 to-slate-200 border border-slate-200 shadow-lg">
-        <CardHeader>
-          <CardTitle>Live Form Preview</CardTitle>
-          <p className="text-sm text-muted-foreground">
+      <Card className="bg-gradient-to-b from-white/80 to-slate-200 border border-slate-200 shadow-lg dark:from-[#05070f] dark:to-[#0b0c16] dark:border-gray-800 dark:shadow-black/30">
+        <CardHeader className="dark:border-b dark:border-gray-800">
+          <CardTitle className="text-slate-900 dark:text-slate-100">Live Form Preview</CardTitle>
+          <p className="text-sm text-muted-foreground dark:text-slate-400">
             Scroll through your form as if it were rendered inside a PDF page. Every section and field updates instantly.
           </p>
         </CardHeader>
-        <CardContent>
+        <CardContent className="dark:bg-transparent">
           <div className="h-[520px] overflow-y-auto">
-            <div className="relative mx-auto max-w-[540px] rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-lg shadow-slate-600/10">
-              <div className="h-[2px] w-14 bg-slate-400/80 mb-4 rounded-full" />
+            <div className="relative mx-auto max-w-[540px] rounded-2xl border border-slate-200 bg-white/90 p-6 shadow-lg shadow-slate-600/10 dark:border-[#1f2933] dark:bg-[#05070f] dark:shadow-black/50">
+              <div className="h-[2px] w-14 bg-slate-400/80 mb-4 rounded-full dark:bg-slate-500/70" />
               <div className="space-y-2">
-                <p className="text-lg font-semibold text-slate-800">{title || "Untitled form"}</p>
-                <p className="text-xs text-slate-500">{description || "Describe the purpose of the medical form here."}</p>
+                <p className="text-lg font-semibold text-slate-800 dark:text-slate-100">{title || "Untitled form"}</p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{description || "Describe the purpose of the medical form here."}</p>
               </div>
               <div className="mt-5 space-y-4">
                 {hasPreviewContent ? (
                   previewSections.map((section, sectionIndex) => (
-                    <div key={`section-${sectionIndex}-${section.title}`} className="space-y-2 rounded bg-slate-50/80 p-4 shadow-inner">
+                    <div
+                      key={`section-${sectionIndex}-${section.title}`}
+                      className="space-y-2 rounded bg-slate-50/80 p-4 shadow-inner dark:bg-white/5 dark:text-slate-200"
+                    >
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-slate-700">{section.title}</p>
+                        <p className="text-sm font-semibold text-slate-700 dark:text-slate-100">{section.title}</p>
                         <Badge variant="outline" className="text-[11px] py-0.5 px-2">
                           {section.fields.length} field{section.fields.length === 1 ? "" : "s"}
                         </Badge>
@@ -367,7 +370,7 @@ export function FormBuilder({ loadForm, onLoadComplete }: FormBuilderProps = {})
                         {section.fields.map((field, fieldIndex) => (
                           <div
                             key={`field-${sectionIndex}-${fieldIndex}-${field.type}-${field.label}`}
-                            className="flex items-center justify-between text-xs text-slate-600"
+                            className="flex items-center justify-between text-xs text-slate-600 dark:text-slate-300"
                           >
                             <span className="line-clamp-1">{field.label}</span>
                             <Badge variant="secondary" className="text-[11px] py-0.5 px-2">
@@ -379,13 +382,13 @@ export function FormBuilder({ loadForm, onLoadComplete }: FormBuilderProps = {})
                     </div>
                   ))
                 ) : (
-                  <div className="rounded-lg border-2 border-dashed border-slate-300/80 p-6 text-center text-sm text-slate-600">
-                    <p className="font-semibold text-slate-800">Nothing to preview yet</p>
-                    <p className="text-xs text-slate-500">Add a field to any section and see the “PDF” update instantly.</p>
+                  <div className="rounded-lg border-2 border-dashed border-slate-300/80 p-6 text-center text-sm text-slate-600 dark:border-slate-700/60 dark:text-slate-300">
+                    <p className="font-semibold text-slate-800 dark:text-slate-100">Nothing to preview yet</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">Add a field to any section and see the “PDF” update instantly.</p>
                   </div>
                 )}
               </div>
-              <div className="mt-6 flex justify-between text-[11px] text-slate-500">
+              <div className="mt-6 flex justify-between text-[11px] text-slate-500 dark:text-slate-400">
                 <span>Live preview · Auto-updates</span>
                 <span>PDF-like layout</span>
               </div>

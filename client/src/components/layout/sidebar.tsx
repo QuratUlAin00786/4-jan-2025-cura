@@ -53,8 +53,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { LogOut, User, Settings as SettingsIcon } from "lucide-react";
 import { useState, useEffect } from "react";
+import { useTheme } from "@/hooks/use-theme";
 import { useQuery } from "@tanstack/react-query";
 import type { Organization } from "@/types";
+const darkLogoWhite = new URL("../../../../attached_assets/dark-logo/cura-logo-white.png", import.meta.url).href;
 
 const ALL_NAVIGATION = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard, module: "dashboard" },
@@ -174,6 +176,7 @@ export function Sidebar() {
   const [isRoleDataReady, setIsRoleDataReady] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const { theme } = useTheme();
 
   // Fetch organization data with React Query
   const { data: organizationData } = useQuery<Organization>({
@@ -305,7 +308,11 @@ export function Sidebar() {
         <div className="p-6 border-b border-neutral-100 dark:border-border">
           <div className="flex flex-col items-center text-center">
             <img
-              src={organizationData?.settings?.theme?.logoUrl || tenant?.settings?.theme?.logoUrl || "/cura-logo-chatbot.png"}
+              src={
+                organizationData?.settings?.theme?.logoUrl ||
+                tenant?.settings?.theme?.logoUrl ||
+                (theme === "dark" ? darkLogoWhite : "/cura-logo-chatbot.png")
+              }
               alt={organizationData?.name || tenant?.name || "Cura"}
               className="h-30 w-auto mb-2"
             />

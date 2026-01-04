@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/hooks/use-auth";
 import { apiRequest } from "@/lib/queryClient";
 import { useLocation } from "wouter";
 import { getActiveSubdomain } from "@/lib/subdomain-utils";
@@ -60,21 +61,44 @@ export function NotificationBell() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  const { user } = useAuth();
 
   // Fetch unread count
   const { data: unreadCountData } = useQuery({
     queryKey: ["/api/notifications/unread-count"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/notifications/unread-count");
+      if (!response.ok) {
+        throw new Error("Failed to fetch unread count");
+      }
+      return response.json();
+    },
     refetchInterval: 30000, // Refetch every 30 seconds
   });
 
   const unreadCount = (unreadCountData as { count: number })?.count || 0;
 
+  const { data: totalNotificationsData } = useQuery({
+    queryKey: ["/api/notifications/count"],
+    queryFn: async () => {
+      const response = await apiRequest("GET", "/api/notifications/count");
+      if (!response.ok) {
+        throw new Error("Failed to fetch notification count");
+      }
+      return response.json();
+    },
+    enabled: true,
+    staleTime: 60000,
+  });
+
   // Fetch notifications
   const { data: notifications = [], isLoading } = useQuery<Notification[]>({
     queryKey: ["/api/notifications"],
-    enabled: isOpen,
+    enabled: user?.role === "admin" ? true : isOpen,
   });
 
+  const totalNotifications = (totalNotificationsData as { count: number })?.count || notifications.length;
+  const badgeCount = user?.role === "admin" ? totalNotifications : unreadCount;
   const visibleNotifications = notifications.filter(
     (notification) => notification.status !== "dismissed" && notification.status !== "archived",
   );
@@ -201,7 +225,7 @@ export function NotificationBell() {
       
       <DropdownMenuContent 
         align="end" 
-        className="w-96 max-h-[500px] overflow-hidden p-0"
+        className="w-96 max-h-[840px] overflow-hidden p-0"
         sideOffset={5}
       >
         <div className="flex items-center justify-between p-4 border-b">
@@ -219,12 +243,14 @@ export function NotificationBell() {
               </Button>
             )}
             <Badge variant="secondary" className="ml-2">
-              {unreadCount} unread
+              {badgeCount} total
             </Badge>
           </div>
         </div>
 
-        <ScrollArea className="max-h-96">
+        <ScrollArea
+          className={user?.role === "admin" ? "h-[300px] overflow-y-auto" : "h-[800px]"}
+        >
           {isLoading ? (
             <div className="p-4 text-center text-gray-500">
               <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600 mx-auto mb-2"></div>
